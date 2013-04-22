@@ -568,6 +568,7 @@ ssize_t rio_writen(int fd, void *usrbuf, size_t n)
 	nleft -= nwritten;
 	bufp += nwritten;
     }
+    printf("-> %s", (char *)usrbuf);
     return n;
 }
 /* $end rio_writen */
