@@ -4,29 +4,46 @@
 #include "ptypes.h"
 #include "proxythread.h"
 
+#define DEBUG
+#ifdef DEBUG
+# define dbg_printf(...) printf(__VA_ARGS__)
+#else
+# define dbg_printf(...)
+#endif
+
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
-#define THREAD_POOL_SIZE 10
-#define SBUFSIZE 20
 
 #define PORT 4647
+#define HTTP_PORT 80
 
+static const char *msg_http_version = "HTTP/1.0";
 static const char *msg_user_agent = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
 static const char *msg_accept = "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n";
 static const char *msg_accept_encoding = "Accept-Encoding: gzip, deflate\r\n";
+static const char *msg_connection = "Connection: close\r\n";
+static const char *msg_proxy_connection = "Proxy-Connection: close\r\n";
 
-void doit(int connfd);
-void read_requesthdrs(rio_t *rp);
-void clienterror(int connfd, char *cause, char *errnum,
+/* About request/response */
+void process_conn(int browserfd);
+int parse_uri(char *uri, char *path);
+int parse_host(rio_t *browser_rp, char *buf, char *host);
+void write_defaulthdrs(int webserverfd,char *method,char *host,char *path);
+void readwrite_requesthdrs(rio_t *browser_rio, int browserfd);
+void clienterror(int browserfd, char *cause, char *errnum,
     char *shortmsg, char *longmsg);
-int parse_uri(char *uri, char *hostname, char *path);
-void *request_handler(void *vargp);
 
+/* About thread */
+#define THREAD_POOL_SIZE 10
+#define SBUFSIZE 200
+
+void *request_handler(void *vargp);
 sbuf_t sbuf; /* Shared buffer of connected descriptors */
 
+/* main - TODO: put comment here */
 int main(int argc, char **argv)
 {
-    int listenfd, connfd, port, i;
+    int listenfd, browserfd, port, i;
     socklen_t clientlen;
     struct sockaddr_in clientaddr;
     struct hostent *hp;
@@ -49,15 +66,16 @@ int main(int argc, char **argv)
     printf("done!\n");
 
     sbuf_init(&sbuf, SBUFSIZE);
+
     /* Listen to incoming clients.. forever */
     listenfd = Open_listenfd(port);
     
     printf("Listening on port %d\n", port);
     while (1) {
         clientlen = sizeof(clientaddr);
-        connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        printf("Accpept: connfd: %d\n", connfd);
-        sbuf_insert(&sbuf, connfd); /* Insert connfd in buffer */
+        browserfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+        printf("Accpept: browserfd: %d\n", browserfd);
+        sbuf_insert(&sbuf, browserfd); /* Insert browserfd in buffer */
 
 //        /* Show information of connected client */
 //        hp = Gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr,
@@ -65,8 +83,8 @@ int main(int argc, char **argv)
 //        haddrp = inet_ntoa(clientaddr.sin_addr);
 //        printf("server connected to %s (%s)\n", hp->h_name, haddrp);
 //
-//        doit(connfd);
-//        Close(connfd);
+//        doit(browserfd);
+//        Close(browserfd);
     }
 
     return 0;
@@ -86,58 +104,174 @@ void *request_handler(void *vargp){
     
     Pthread_detach(pthread_self());
     while (1) {
-        int connfd = sbuf_remove(&sbuf); /* Remove connfd from buffer */
-        printf("[Thread %d] handling fd: %d\n", pthread_self(), connfd);
-        doit(connfd);
-        Close(connfd);
+        int browserfd = sbuf_remove(&sbuf); /* Remove browserfd from buffer */
+        printf("[Thread %d] handling fd: %d\n", (int)pthread_self(), browserfd);
+
+        /* At this point, we already have fd that represent a requeste */
+        process_conn(browserfd);
+
+        /* Close connection and free resouces */
+        Close(browserfd);
     }
     
+    /* The conde neves reach here because of the while loop */
     return NULL;
 }
 
 
-
-void doit(int connfd) {
+/* 
+ * process_conn - Process the connection
+ * This function process the connection by reading the HTTP METHODS.
+ * Here are the possible HTTP methods.
+ * GET - Check if it is static and is mainted on our cache.
+ */
+void process_conn(int browserfd) {
+    int is_static;
     // struct stat sbuf;
-    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE],
-        hostname[MAXLINE], path[MAXLINE];
-    rio_t rio;
+    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
+    char host[MAXLINE], path[MAXLINE];
+    rio_t browser_rio, webserver_rio;
+    int webserverfd, n;
 
-    /* Read request line and headers */
-    Rio_readinitb(&rio, connfd);
-    Rio_readlineb(&rio, buf, MAXLINE);
+    /* Read request line and headers, only GET method is supported */
+    Rio_readinitb(&browser_rio, browserfd);
+    Rio_readlineb(&browser_rio, buf, MAXLINE);
     sscanf(buf, "%s %s %s", method, uri, version);
-    printf("<< %s", buf);
-    /* Only support GET */
+    dbg_printf("<< %s", buf);
     if (strcasecmp(method, "GET")) {
-        clienterror(connfd, method, "501", "Not Implemented",
+        clienterror(browserfd, method, "501", "Not Implemented",
             "This proxy doesn't implement this method.");
         return;
     }
-    if (parse_uri(uri, hostname, path)) {
-        clienterror(connfd, method, "501", "Unrecognizable URI",
-            "This proxy doesn't know how to recognize this URI.");
+
+    /* Extract path from URI and get document type (for caching purpose) */
+    is_static = parse_uri(uri, path);
+
+    /* Read Host value and store it */
+    if (!parse_host(&browser_rio, buf, host)) {
+        clienterror(browserfd, method, "501", "Host header not found",
+            "No host header was found.");
         return;
     }
-    printf("* Hostname:%s Path:%s\n",hostname,path);
 
-    read_requesthdrs(&rio);
+    /* Connect to the server specified by "host" */
+    dbg_printf("* Connecting to %s..", host);
+    webserverfd = Open_clientfd(host, HTTP_PORT);
+    dbg_printf(" connected.\n");
+    Rio_readinitb(&webserver_rio, webserverfd);
 
+    /* Send HTTP header */
+    write_defaulthdrs(webserverfd, method, host, path);
 
+    /* Read the rest of the header and forward necessary ones */
+    readwrite_requesthdrs(&browser_rio, webserverfd);
+
+    /* Read response from the web server and forward it */
+    while ((n = Rio_readlineb(&webserver_rio, buf, MAXLINE)) != 0) {
+        Rio_writen(browserfd, buf, n);
+    }
+    
+    Close(webserverfd);
 }
 
-/* read_requesthdrs - Read the rest of header
-    But we ignore them */
-void read_requesthdrs(rio_t *rp) {
+/*
+ * parse_uri - parse URI and extract the path
+ *             return 0 if dynamic content, 1 if static
+ */
+/* $begin parse_uri */
+int parse_uri(char *uri, char *path) //, char *cgiargs) 
+{
+    char *ptr;
+
+    /* Get path */
+    ptr = strstr(uri, "://");
+    ptr += 3;
+    ptr = strchr(ptr, '/');
+    strncpy(path, ptr, (int)strlen(uri));
+
+    return 1; // Part I: Treat everything as static
+    // char *ptr;
+
+    // if (!strstr(uri, "cgi-bin")) {  /* Static content */
+        // strcpy(cgiargs, "");
+        // strcpy(filename, ".");
+        // strcat(filename, uri);
+        // if (uri[strlen(uri)-1] == '/')
+        //     strcat(filename, "home.html");
+    //     return 1;
+    // } else {  /* Dynamic content */
+        // ptr = index(uri, '?');
+        // if (ptr) {
+        //     strcpy(cgiargs, ptr+1);
+        //     *ptr = '\0';
+        // } else 
+        //     strcpy(cgiargs, "");
+        // strcpy(filename, ".");
+        // strcat(filename, uri);
+    //     return 0;
+    // }
+}
+/* $end parse_uri */
+
+/* parse_host - Extract host from the header */
+int parse_host(rio_t *browser_rp, char *buf, char *host) {
+    char key[MAXLINE], value[MAXLINE];
+
+    Rio_readlineb(browser_rp, buf, MAXLINE);
+    sscanf(buf, "%s %s", key, value);
+    if (strcasecmp(key, "Host:")) {
+        return 0;
+    }
+    strncpy(host, value, strlen(value));
+    host[strlen(value)] = '\0';
+    return 1;
+}
+
+/* write_defaulthdrs - Write headers from requirement */
+void write_defaulthdrs(int webserverfd,char *method,char *host,char *path) {
     char buf[MAXLINE];
 
+    sprintf(buf, "%s %s %s\r\n", method, path, msg_http_version);
+    Rio_writen(webserverfd, buf, strlen(buf));
+
+    sprintf(buf, "Host: %s\r\n", host);
+    Rio_writen(webserverfd, buf, strlen(buf));
+
+    Rio_writen(webserverfd, (void *)msg_user_agent, 
+        strlen(msg_user_agent));
+    Rio_writen(webserverfd, (void *)msg_accept, 
+        strlen(msg_accept));
+    Rio_writen(webserverfd, (void *)msg_accept_encoding, 
+        strlen(msg_accept_encoding));
+    Rio_writen(webserverfd, (void *)msg_connection, 
+        strlen(msg_connection));
+    Rio_writen(webserverfd, (void *)msg_proxy_connection, 
+        strlen(msg_proxy_connection));
+}
+
+/* readwrite_requesthdrs - Read the rest of the header
+    and only forward lines that aren't specified in the writeup */
+void readwrite_requesthdrs(rio_t *browser_rio, int browserfd) {
+    char buf[MAXLINE], key[MAXLINE];
+
     do {
-        Rio_readlineb(rp, buf, MAXLINE);
-        printf("<< %s", buf);
+        /* Read each line, get only key and consider forwarding it */
+        Rio_readlineb(browser_rio, buf, MAXLINE);
+        // dbg_printf("<< %s", buf);
+        strcpy(key, "");
+        sscanf(buf, "%s", key);
+        if (strcasecmp(key, "User-Agent") &&
+            strcasecmp(key, "Accept:") &&
+            strcasecmp(key, "Accept-Encoding:") &&
+            strcasecmp(key, "Connection:") &&
+            strcasecmp(key, "Proxy-Connection:")) {
+            Rio_writen(browserfd, (void *)buf, strlen(buf));
+        }
     } while (strcmp(buf, "\r\n"));
 }
 
-void clienterror(int connfd, char *cause, char *errnum,
+/* clienterror - Print error page */
+void clienterror(int browserfd, char *cause, char *errnum,
     char *shortmsg, char *longmsg) {
     char buf[MAXLINE], body[MAXBUF];
 
@@ -149,30 +283,52 @@ void clienterror(int connfd, char *cause, char *errnum,
 
     /* Print the HTTP response */
     sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
-    Rio_writen(connfd, buf, strlen(buf));
+    Rio_writen(browserfd, buf, strlen(buf));
     sprintf(buf, "Content-type: text/html\r\n");
-    Rio_writen(connfd, buf, strlen(buf));
+    Rio_writen(browserfd, buf, strlen(buf));
     sprintf(buf, "Content-length: %d\r\n\r\n", (int)strlen(body));
-    Rio_writen(connfd, buf, strlen(buf));
-    Rio_writen(connfd, body, strlen(body));
+    Rio_writen(browserfd, buf, strlen(buf));
+    Rio_writen(browserfd, body, strlen(body));
 
 }
 
-int parse_uri(char *uri, char *hostname, char *path) {
-    char *ptr_begin, *ptr_end;
-    int hostname_length = 0;
+/* 
+ * Return 1 if the header contain fields that identify the request object 
+ * can be retrived from our cache.
+ * Return 0 otherwise.
+ * !BE CAREFUL, this will be executed in thread.
+ */
+int contain_cache_header(char *buf){
+    // TODO
+    return 0;
+}
 
-    /* Get hostname */
-    ptr_begin = strstr(uri, "://");
-    ptr_begin += 3;
-    ptr_end = strchr(ptr_begin, '/');
-    hostname_length = (int)(ptr_end-ptr_begin);
-    strncpy(hostname, ptr_begin, hostname_length);
-    hostname[hostname_length] = '\0';
 
-    /* Get path */
-    ptr_begin = ptr_end;
-    strncpy(path, ptr_begin, strlen(uri));
+/*
+ * Return 1 if the requested url is in our cache already; return 0 otherwise.
+ * !BE CAREFUL, this will be executed in thread.
+ */
+int in_cache(char *url){
+    // TODO
+    return 0;
+}
 
+/* 
+ * Write cached object back to the client. 
+ * !BE CAREFUL, this will be executed in thread.
+ */
+int send_from_cache(char *url, int client_fd){
+    // TODO
+    return 0;
+}
+
+/* 
+ * Forward the request from the client to the Internet. Send the result back
+ * to the client. Finally, update HIT counter in cache module to support LRU 
+ * policy.
+ * !BE CAREFUL, this will be executed in thread.
+ */
+int get_from_internet(char *buf, int client_fd){
+    // TODO
     return 0;
 }
