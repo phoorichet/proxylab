@@ -11,8 +11,6 @@
 # define dbg_printf(...)
 #endif
 
-#define MAX_CACHE_SIZE 1049000
-#define MAX_OBJECT_SIZE 102400
 
 #define PORT 4647
 #define HTTP_PORT 80
@@ -48,7 +46,7 @@ int main(int argc, char **argv)
     struct sockaddr_in clientaddr;
     // struct hostent *hp;
     // char *haddrp;
-    pthread_t tid;
+    pthread_t tid[THREAD_POOL_SIZE];
 
 	// if (argc != 1) {
 	// 	fprintf(stderr, "usage: %s <port>\n", argv[0]);
@@ -61,7 +59,7 @@ int main(int argc, char **argv)
     printf("Pre-forking %d working threads..", THREAD_POOL_SIZE);
     /* Prefork thread to the thread pool */
     for (i = 0; i < THREAD_POOL_SIZE; i++) {
-        Pthread_create(&tid, NULL, request_handler, NULL);
+        Pthread_create(&tid[i], NULL, request_handler, NULL);
     }
     printf("done!\n");
 
@@ -86,6 +84,8 @@ int main(int argc, char **argv)
 //        doit(browserfd);
 //        Close(browserfd);
     }
+
+    sbuf_deinit(&sbuf);
 
     return 0;
 }
@@ -167,6 +167,8 @@ void process_conn(int browserfd) {
 
     /* Read response from the web server and forward it */
     while ((n = Rio_readlineb(&webserver_rio, buf, MAXLINE)) != 0) {
+
+        printf("++++++ %s", buf);
         Rio_writen(browserfd, buf, n);
     }
     

@@ -16,7 +16,10 @@ ptypes.o: ptypes.c ptypes.h csapp.o
 proxythread.o: proxythread.c proxythread.h
 	$(CC) $(CFLAGS) -c proxythread.c
 
-proxy: csapp.o ptypes.o proxythread.o proxy.o 
+cache.o: cache.c cache.h
+	$(CC) $(CFLAGS) -c cache.c
+
+proxy: csapp.o ptypes.o proxythread.o proxy.o cache.o
 
 submit:
 	(make clean; cd ..; tar cvf proxylab.tar proxylab-handout)
