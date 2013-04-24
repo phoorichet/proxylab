@@ -15,8 +15,8 @@ void cache_init() {
 	cache.size = 0;
 }
 
-cacheobject_t *cache_get(char *URI) {
-	cacheobject_t *ptr = cache.head;
+CacheObject *cache_get(char *URI) {
+	CacheObject *ptr = cache.head;
 
 	while (ptr != NULL) {
 		/* Look for a cache object with the same URI.
@@ -25,7 +25,7 @@ cacheobject_t *cache_get(char *URI) {
 		if (!strcmp(URI, ptr->URI)) {
 			/* Rearrange prev/next pointers */
 			if (ptr->prev != NULL)
-				printf("%p",((cacheobject_t *)(ptr->prev))->next);//ptr->prev->next = ptr->next;
+				ptr->prev->next = ptr->next;
 			if (ptr->next != NULL)
 				ptr->next->prev = ptr->prev;
 
@@ -47,26 +47,26 @@ cacheobject_t *cache_get(char *URI) {
 }
 
 /* Assume that there's no object with the same URI in the cache */
-int cache_insert(char *URI, size_t size, void *buf) {
+int cache_insert(char *URI, size_t objectsize, void *buf) {
 	/* Ignore spurious call */
-	if (size == 0)
+	if (objectsize == 0)
 		return -1;
 
 	/* Check whether object size exceed maximum size */
-	if (size > MAX_OBJECT_SIZE)
+	if (objectsize > MAX_OBJECT_SIZE)
 		return -2;
 
 	/* Check whether cache has space to store a new object
 		Evict until this new object fits the cache */
-	while (cache.size + size > MAX_CACHE_SIZE) {
+	while (cache.size + objectsize > MAX_CACHE_SIZE) {
 		cache_evict();
 	}
 
 	/* Create a new cache object. Copy data from buf to the cache object's */
-	cacheobject_t *newobject = Calloc(sizeof(cacheobject_t));
-	newobject->size = size;
-	newobject->buf = Calloc(size);
-	memcpy(newobject->buf, buf, size);
+	CacheObject *newobject = Malloc(sizeof(CacheObject));
+	newobject->size = objectsize;
+	newobject->buf = Malloc(objectsize);
+	memcpy(newobject->buf, buf, objectsize);
 
 	/* Append this cache object to the tail & update cache's tail pointer */
 	if (cache.tail != NULL) {
@@ -81,7 +81,7 @@ int cache_insert(char *URI, size_t size, void *buf) {
 	}
 
 	/* Update cache size */
-	cache.size += size;
+	cache.size += objectsize;
 
 	return 0;
 }
@@ -91,7 +91,7 @@ void cache_evict() {
 	if (cache.head == NULL)
 		return;
 
-	cacheobject_t *victim = cache.head;
+	CacheObject *victim = cache.head;
 	cache.size -= victim->size;
 	cache.head = victim->next;
 	(cache.head)->prev = NULL;
