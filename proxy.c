@@ -3,6 +3,7 @@
 #include "csapp.h"
 #include "ptypes.h"
 #include "proxythread.h"
+#include "cache.h"
 
 #define DEBUG
 #ifdef DEBUG
@@ -128,9 +129,9 @@ void process_conn(int browserfd) {
     int is_static;
     // struct stat sbuf;
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char host[MAXLINE], path[MAXLINE];
+    char host[MAXLINE], path[MAXLINE], cachebuf[MAX_OBJECT_SIZE];
     rio_t browser_rio, webserver_rio;
-    int webserverfd, n;
+    int webserverfd, n, cachebuf_size, is_exceeded_max_object_size;
 
     /* Read request line and headers, only GET method is supported */
     Rio_readinitb(&browser_rio, browserfd);
@@ -165,11 +166,38 @@ void process_conn(int browserfd) {
     /* Read the rest of the header and forward necessary ones */
     readwrite_requesthdrs(&browser_rio, webserverfd);
 
-    /* Read response from the web server and forward it */
+    /* Read each line of response from the web server
+        Accumulate it to the cache buffer, then forward it to the browser */
+    cachebuf_size = 0;
+    is_exceeded_max_object_size = 0;
     while ((n = Rio_readlineb(&webserver_rio, buf, MAXLINE)) != 0) {
 
-        printf("++++++ %s", buf);
+        //printf("++++++ Received %d from server\n", n);
+
+        /* If accumulating this makes cachebuf exceeds max size, 
+            then we don't need to put this cachebuf to the cache. */
+        if (!is_exceeded_max_object_size &&
+            cachebuf_size + n <= MAX_OBJECT_SIZE) {
+            memcpy((cachebuf + cachebuf_size), buf, n);
+            cachebuf_size += n;
+        } else {
+            is_exceeded_max_object_size = 1;
+        }
+
         Rio_writen(browserfd, buf, n);
+    }
+
+    /* If this cachebuf doesn't exceed the maximum size,
+        then put it in the cache */
+    if (!is_exceeded_max_object_size) {
+        int errorcode = cache_insert(uri, cachebuf, cachebuf_size);
+        if (!errorcode) {
+            printf("^^^^^^ Inserted cachebuf with size %d\n", cachebuf_size);
+        } else {
+            // TODO: To test robustness for BIG object
+            printf("fuck %d\n",errorcode);
+            exit(0);
+        }
     }
     
     Close(webserverfd);

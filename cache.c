@@ -15,14 +15,14 @@ void cache_init() {
 	cache.size = 0;
 }
 
-CacheObject *cache_get(char *URI) {
+CacheObject *cache_get(char *uri) {
 	CacheObject *ptr = cache.head;
 
 	while (ptr != NULL) {
-		/* Look for a cache object with the same URI.
+		/* Look for a cache object with the same uri.
 			When found, move this object to the tail.
 			Then return this object. */
-		if (!strcmp(URI, ptr->URI)) {
+		if (!strcmp(uri, ptr->uri)) {
 			/* Rearrange prev/next pointers */
 			if (ptr->prev != NULL)
 				ptr->prev->next = ptr->next;
@@ -46,8 +46,8 @@ CacheObject *cache_get(char *URI) {
 	return NULL;
 }
 
-/* Assume that there's no object with the same URI in the cache */
-int cache_insert(char *URI, size_t objectsize, void *buf) {
+/* Assume that there's no object with the same uri in the cache */
+int cache_insert(char *uri, void *data, size_t objectsize) {
 	/* Ignore spurious call */
 	if (objectsize == 0)
 		return -1;
@@ -60,13 +60,14 @@ int cache_insert(char *URI, size_t objectsize, void *buf) {
 		Evict until this new object fits the cache */
 	while (cache.size + objectsize > MAX_CACHE_SIZE) {
 		cache_evict();
+		printf("Evicted (cache size = %d, and we need %d)\n", cache.size, objectsize);
 	}
 
-	/* Create a new cache object. Copy data from buf to the cache object's */
+	/* Create a new cache object. Copy data to the cache object's */
 	CacheObject *newobject = Malloc(sizeof(CacheObject));
 	newobject->size = objectsize;
-	newobject->buf = Malloc(objectsize);
-	memcpy(newobject->buf, buf, objectsize);
+	newobject->data = Malloc(objectsize);
+	memcpy(newobject->data, data, objectsize);
 
 	/* Append this cache object to the tail & update cache's tail pointer */
 	if (cache.tail != NULL) {
@@ -92,10 +93,10 @@ void cache_evict() {
 		return;
 
 	CacheObject *victim = cache.head;
-	cache.size -= victim->size;
 	cache.head = victim->next;
 	(cache.head)->prev = NULL;
 	Free(victim);
 
+	cache.size -= victim->size;
 }
 
