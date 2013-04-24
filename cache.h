@@ -35,4 +35,6 @@ CacheObject *cache_get(char *uri);
 int cache_insert(char *uri, void *data, size_t objectsize);
 void cache_evict();
 
+void print_cache();
+
 #endif

@@ -17,15 +17,21 @@ void cache_init() {
 
 CacheObject *cache_get(char *uri) {
 	CacheObject *ptr = cache.head;
-
+	printf("~~~~~~~ Got uri = %s\n", uri);
 	while (ptr != NULL) {
+		printf("\tLooking cache uri = %s..\n", ptr->uri);
 		/* Look for a cache object with the same uri.
 			When found, move this object to the tail.
 			Then return this object. */
-		if (!strcmp(uri, ptr->uri)) {
+		if (!strcasecmp(uri, ptr->uri)) {
+			
+
 			/* Rearrange prev/next pointers */
 			if (ptr->prev != NULL)
 				ptr->prev->next = ptr->next;
+			else 
+				cache.head = ptr->next;
+
 			if (ptr->next != NULL)
 				ptr->next->prev = ptr->prev;
 
@@ -43,6 +49,7 @@ CacheObject *cache_get(char *uri) {
 
 		ptr = ptr->next;
 	}
+	printf("... no cache found\n");
 	return NULL;
 }
 
@@ -60,29 +67,33 @@ int cache_insert(char *uri, void *data, size_t objectsize) {
 		Evict until this new object fits the cache */
 	while (cache.size + objectsize > MAX_CACHE_SIZE) {
 		cache_evict();
-		printf("Evicted (cache size = %d, and we need %d)\n", cache.size, objectsize);
+		printf("Evicted (cache size = %u, and we need %u)\n", (unsigned int)cache.size, (unsigned int)objectsize);
 	}
 
 	/* Create a new cache object. Copy data to the cache object's */
-	CacheObject *newobject = Malloc(sizeof(CacheObject));
+	CacheObject *newobject = Calloc(1, sizeof(CacheObject));
 	newobject->size = objectsize;
-	newobject->data = Malloc(objectsize);
+	newobject->data = Calloc(1, objectsize);
+	newobject->uri = Calloc(1, strlen(uri));
+	memcpy(newobject->uri, uri, strlen(uri));
 	memcpy(newobject->data, data, objectsize);
 
-	/* Append this cache object to the tail & update cache's tail pointer */
-	if (cache.tail != NULL) {
+	if (cache.head == NULL && cache.tail == NULL) {
+		cache.head = newobject;
+		cache.tail = newobject;
+		newobject->prev = NULL;
+		newobject->next = NULL;
+	} else {
+		/* Append this cache object to the tail & update cache's tail pointer */
 		(cache.tail)->next = newobject;
 		newobject->prev = cache.tail;
-		newobject->next = NULL;
-		cache.tail = newobject;
-	} else {
-		newobject->prev = NULL;
 		newobject->next = NULL;
 		cache.tail = newobject;
 	}
 
 	/* Update cache size */
 	cache.size += objectsize;
+	print_cache();
 
 	return 0;
 }
@@ -95,8 +106,19 @@ void cache_evict() {
 	CacheObject *victim = cache.head;
 	cache.head = victim->next;
 	(cache.head)->prev = NULL;
+	Free(victim->data);
 	Free(victim);
 
 	cache.size -= victim->size;
+}
+
+void print_cache() {
+	printf("** Cache (size = %u) **\n", (unsigned int)cache.size);
+	CacheObject *ptr = cache.head;
+	while (ptr != NULL) {
+		printf("\t%s\n", ptr->uri);
+		ptr = ptr->next;
+	}
+	printf("** end **\n");
 }
 

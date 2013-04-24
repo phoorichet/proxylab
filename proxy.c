@@ -5,14 +5,6 @@
 #include "proxythread.h"
 #include "cache.h"
 
-#define DEBUG
-#ifdef DEBUG
-# define dbg_printf(...) printf(__VA_ARGS__)
-#else
-# define dbg_printf(...)
-#endif
-
-
 #define PORT 4647
 #define HTTP_PORT 80
 
@@ -73,8 +65,8 @@ int main(int argc, char **argv)
     while (1) {
         clientlen = sizeof(clientaddr);
         browserfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        sbuf_insert(&sbuf, browserfd); /* Insert browserfd in buffer */
         printf("Accepted browserfd = %d to s_buf\n", browserfd);
+        sbuf_insert(&sbuf, browserfd); /* Insert browserfd in buffer */
 
 //        /* Show information of connected client */
 //        hp = Gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr,
@@ -110,10 +102,10 @@ void *request_handler(void *vargp){
         and finally wait for the other one. Do this forever */
     while (1) {
         int browserfd = sbuf_remove(&sbuf);
-        dbg_printf("[Thread %u] is handling browserfd = %d\n", (unsigned int)pthread_self(), browserfd);
+        printf("[Thread %u] is handling browserfd = %d\n", (unsigned int)pthread_self(), browserfd);
         process_conn(browserfd);
         Close(browserfd);
-        dbg_printf("    [Thread %u] has finished the job.\n", (unsigned int)pthread_self());
+        printf("    [Thread %u] has finished the job.\n", (unsigned int)pthread_self());
     }
     
     /* The thread never reaches here because of the while loop */
@@ -126,46 +118,66 @@ void *request_handler(void *vargp){
  * This function process the connection's request to GET data on the web server.
  */
 void process_conn(int browserfd) {
-    int is_static;
+    /*int is_static;*/
     // struct stat sbuf;
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char host[MAXLINE], path[MAXLINE], cachebuf[MAX_OBJECT_SIZE];
+    char host[MAXLINE], /*path[MAXLINE],*/ cachebuf[MAX_OBJECT_SIZE];
     rio_t browser_rio, webserver_rio;
-    int webserverfd, n, cachebuf_size, is_exceeded_max_object_size;
+    int webserverfd, n, is_exceeded_max_object_size;
+    size_t cachebuf_size;
 
     /* Read request line and headers, only GET method is supported */
     Rio_readinitb(&browser_rio, browserfd);
     Rio_readlineb(&browser_rio, buf, MAXLINE);
     sscanf(buf, "%s %s %s", method, uri, version);
-    dbg_printf("[Thread %u] << %s", (unsigned int)pthread_self(), buf);
+    printf("[Thread %u] << %s", (unsigned int)pthread_self(), buf);
     if (strcasecmp(method, "GET")) {
         clienterror(browserfd, method, "501", "Not Implemented",
             "This proxy doesn't implement this method.");
         return;
     }
 
+    // printf("kuay\n");
+
+    /* Check if the object with this uri is existed in the cache */
+    CacheObject *cacheobj = cache_get(uri);
+    if (cacheobj != NULL) {
+        /* Serve this cached object to the browser right away */
+        Rio_writen(browserfd, cacheobj->data, cacheobj->size);
+        printf("@@@@@ Served from the cache %u bytes\n", (unsigned int)cacheobj->size);
+        return;
+    }
+
+    // printf("fck\n");
+
     /* Extract path from URI and get document type (for caching purpose) */
-    is_static = parse_uri(uri, path);
+    //is_static = parse_uri(uri, path);
+
+    // TODO: BUFFER THE REST OF HEADER THEN SCAN FOR "HOST" THEN FORWARD THEM TO THE SERVER
 
     /* Read Host value and store it */
     if (!parse_host(&browser_rio, buf, host)) {
         clienterror(browserfd, method, "501", "Host header not found",
-            "No host header was found.");
+            buf);
         return;
     }
 
+    // printf("123\n");
     /* Connect to the server specified by "host" */
-    // dbg_printf("* [Thread %u] Connecting to %s..", (unsigned int)pthread_self(), host);
+    printf("* [Thread %u] Connecting to %s..", (unsigned int)pthread_self(), host);
     webserverfd = Open_clientfd(host, HTTP_PORT);
-    // dbg_printf(" connected.\n");
+    printf(" connected.\n");
     Rio_readinitb(&webserver_rio, webserverfd);
 
+    // printf("222\n");
     /* Send HTTP header */
-    write_defaulthdrs(webserverfd, method, host, path);
+    write_defaulthdrs(webserverfd, method, host, uri);//path);
 
+    // printf("333\n");
     /* Read the rest of the header and forward necessary ones */
     readwrite_requesthdrs(&browser_rio, webserverfd);
 
+    // printf("456\n");
     /* Read each line of response from the web server
         Accumulate it to the cache buffer, then forward it to the browser */
     cachebuf_size = 0;
@@ -187,17 +199,21 @@ void process_conn(int browserfd) {
         Rio_writen(browserfd, buf, n);
     }
 
+    printf("789\n");
     /* If this cachebuf doesn't exceed the maximum size,
         then put it in the cache */
     if (!is_exceeded_max_object_size) {
         int errorcode = cache_insert(uri, cachebuf, cachebuf_size);
         if (!errorcode) {
-            printf("^^^^^^ Inserted cachebuf with size %d\n", cachebuf_size);
+            printf("^^^^^^ Inserted to the cache %u bytes (now cache size = %u)\n", 
+                (unsigned int)cachebuf_size, (unsigned int)cache.size);
         } else {
             // TODO: To test robustness for BIG object
-            printf("fuck %d\n",errorcode);
+            printf("damn it I couldn't insert to cache %d\n",errorcode);
             exit(0);
         }
+    } else {
+        printf("This object has exceeded the maximum object size. Not cached.\n");
     }
     
     Close(webserverfd);
