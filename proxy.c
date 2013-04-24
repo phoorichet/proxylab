@@ -46,8 +46,8 @@ int main(int argc, char **argv)
     int listenfd, browserfd, port, i;
     socklen_t clientlen;
     struct sockaddr_in clientaddr;
-    struct hostent *hp;
-    char *haddrp;
+    // struct hostent *hp;
+    // char *haddrp;
     pthread_t tid;
 
 	// if (argc != 1) {
@@ -74,8 +74,8 @@ int main(int argc, char **argv)
     while (1) {
         clientlen = sizeof(clientaddr);
         browserfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        printf("Accpept: browserfd: %d\n", browserfd);
         sbuf_insert(&sbuf, browserfd); /* Insert browserfd in buffer */
+        printf("Accepted browserfd = %d to s_buf\n", browserfd);
 
 //        /* Show information of connected client */
 //        hp = Gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr,
@@ -103,27 +103,26 @@ int main(int argc, char **argv)
 void *request_handler(void *vargp){
     
     Pthread_detach(pthread_self());
+
+    /* Wait for the job, which is a browser's file descriptor in s_buf
+        After this thread got the browserfd, it then process it, close it,
+        and finally wait for the other one. Do this forever */
     while (1) {
-        int browserfd = sbuf_remove(&sbuf); /* Remove browserfd from buffer */
-        printf("[Thread %d] handling fd: %d\n", (int)pthread_self(), browserfd);
-
-        /* At this point, we already have fd that represent a requeste */
+        int browserfd = sbuf_remove(&sbuf);
+        dbg_printf("[Thread %u] is handling browserfd = %d\n", (unsigned int)pthread_self(), browserfd);
         process_conn(browserfd);
-
-        /* Close connection and free resouces */
         Close(browserfd);
+        dbg_printf("    [Thread %u] has finished the job.\n", (unsigned int)pthread_self());
     }
     
-    /* The conde neves reach here because of the while loop */
+    /* The thread never reaches here because of the while loop */
     return NULL;
 }
 
 
 /* 
  * process_conn - Process the connection
- * This function process the connection by reading the HTTP METHODS.
- * Here are the possible HTTP methods.
- * GET - Check if it is static and is mainted on our cache.
+ * This function process the connection's request to GET data on the web server.
  */
 void process_conn(int browserfd) {
     int is_static;
@@ -137,7 +136,7 @@ void process_conn(int browserfd) {
     Rio_readinitb(&browser_rio, browserfd);
     Rio_readlineb(&browser_rio, buf, MAXLINE);
     sscanf(buf, "%s %s %s", method, uri, version);
-    dbg_printf("<< %s", buf);
+    dbg_printf("[Thread %u] << %s", (unsigned int)pthread_self(), buf);
     if (strcasecmp(method, "GET")) {
         clienterror(browserfd, method, "501", "Not Implemented",
             "This proxy doesn't implement this method.");
@@ -155,9 +154,9 @@ void process_conn(int browserfd) {
     }
 
     /* Connect to the server specified by "host" */
-    dbg_printf("* Connecting to %s..", host);
+    // dbg_printf("* [Thread %u] Connecting to %s..", (unsigned int)pthread_self(), host);
     webserverfd = Open_clientfd(host, HTTP_PORT);
-    dbg_printf(" connected.\n");
+    // dbg_printf(" connected.\n");
     Rio_readinitb(&webserver_rio, webserverfd);
 
     /* Send HTTP header */
