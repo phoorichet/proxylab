@@ -14,7 +14,7 @@ void clienterror(int browserfd, char *cause, char *errnum,
 
 /* About thread */
 #define THREAD_POOL_SIZE 10
-#define SBUFSIZE 500
+#define SBUFSIZE 20
 
 void *request_handler(void *vargp);
 sbuf_t sbuf; /* Shared buffer of connected descriptors */

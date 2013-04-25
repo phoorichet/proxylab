@@ -37,5 +37,6 @@ int cache_insert(char *uri, void *data, size_t objectsize);
 void cache_evict();
 
 void print_cache();
+void check_cache();
 
 #endif
