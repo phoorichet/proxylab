@@ -1,5 +1,6 @@
 /* $begin csapp.c */
 #include "csapp.h"
+#include "proxy.h"
 
 /************************** 
  * Error-handling functions
@@ -682,15 +683,22 @@ ssize_t Rio_readn(int fd, void *ptr, size_t nbytes)
 {
     ssize_t n;
   
-    if ((n = rio_readn(fd, ptr, nbytes)) < 0)
-	unix_error("Rio_readn error");
+    if ((n = rio_readn(fd, ptr, nbytes)) < 0) {
+	   // unix_error("Rio_readn error");
+        clienterror(fd, "GET", "500", "Rio_readn error", strerror(errno));
+        pthread_exit(NULL);
+    }
     return n;
 }
 
+/* Modified to call clienterror() for error */
 void Rio_writen(int fd, void *usrbuf, size_t n) 
 {
-    if (rio_writen(fd, usrbuf, n) != n)
-	unix_error("Rio_writen error");
+    if (rio_writen(fd, usrbuf, n) != n) {
+        //unix_error("Rio_writen error");
+        clienterror(fd, "GET", "500", "Rio_writen error", strerror(errno));
+        pthread_exit(NULL);
+    }
 }
 
 void Rio_readinitb(rio_t *rp, int fd)
@@ -702,8 +710,11 @@ ssize_t Rio_readnb(rio_t *rp, void *usrbuf, size_t n)
 {
     ssize_t rc;
 
-    if ((rc = rio_readnb(rp, usrbuf, n)) < 0)
-	unix_error("Rio_readnb error");
+    if ((rc = rio_readnb(rp, usrbuf, n)) < 0) {
+        // unix_error("Rio_readn error");
+        clienterror(rp->rio_fd, "GET", "500", "Rio_readnb error", strerror(errno));
+        pthread_exit(NULL);
+    }
     return rc;
 }
 
@@ -711,8 +722,11 @@ ssize_t Rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
 {
     ssize_t rc;
 
-    if ((rc = rio_readlineb(rp, usrbuf, maxlen)) < 0)
-	unix_error("Rio_readlineb error");
+    if ((rc = rio_readlineb(rp, usrbuf, maxlen)) < 0) {
+        // unix_error("Rio_readn error");
+        clienterror(rp->rio_fd, "GET", "500", "Rio_readlineb error", strerror(errno));
+        pthread_exit(NULL);
+    }
     return rc;
 } 
 

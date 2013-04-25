@@ -25,7 +25,8 @@ typedef struct cacheobject_t CacheObject;
 typedef struct {
 	CacheObject *head, *tail;
 	size_t size;
-	sem_t mutex;
+	sem_t mutex, w;
+	int readcnt;
 } cache_t;
 
 cache_t cache;
