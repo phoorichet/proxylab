@@ -209,6 +209,7 @@ void check_cache() {
 	printf("Checking cache consistency (expected cache.size = %u)..\n", 
 		(unsigned int)cache.size);
 
+	P(&cache.mutex);
 	P(&cache.w);
 	int objcnt = 0;
 	size_t csize = 0;
@@ -232,4 +233,5 @@ void check_cache() {
 	}
 	assert(cache.size == csize);
 	V(&cache.w);
+	V(&cache.mutex);
 }

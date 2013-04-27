@@ -159,7 +159,9 @@ void process_conn(int browserfd) {
         if (webserverfd == -1)
             clienterror(browserfd, method, "501", "Unix error", strerror(errno));
         else {   
-            clienterror(browserfd, method, "501", "DNS error", strerror(errno));
+            char errmsg[MAXLINE];
+            sprintf(errmsg, "DNS error: %d", h_errno);
+            clienterror(browserfd, method, "501", "DNS error", errmsg);
         }
         return;
     }
@@ -300,45 +302,4 @@ void clienterror(int browserfd, char *cause, char *errnum,
     Rio_writen(browserfd, buf, strlen(buf));
     Rio_writen(browserfd, body, strlen(body));
 
-}
-
-/* 
- * Return 1 if the header contain fields that identify the request object 
- * can be retrived from our cache.
- * Return 0 otherwise.
- * !BE CAREFUL, this will be executed in thread.
- */
-int contain_cache_header(char *buf){
-    // TODO
-    return 0;
-}
-
-
-/*
- * Return 1 if the requested url is in our cache already; return 0 otherwise.
- * !BE CAREFUL, this will be executed in thread.
- */
-int in_cache(char *url){
-    // TODO
-    return 0;
-}
-
-/* 
- * Write cached object back to the client. 
- * !BE CAREFUL, this will be executed in thread.
- */
-int send_from_cache(char *url, int client_fd){
-    // TODO
-    return 0;
-}
-
-/* 
- * Forward the request from the client to the Internet. Send the result back
- * to the client. Finally, update HIT counter in cache module to support LRU 
- * policy.
- * !BE CAREFUL, this will be executed in thread.
- */
-int get_from_internet(char *buf, int client_fd){
-    // TODO
-    return 0;
 }
