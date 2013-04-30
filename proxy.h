@@ -13,8 +13,9 @@ void clienterror(int browserfd, char *cause, char *errnum,
     char *shortmsg, char *longmsg);
 
 /* About thread */
-#define THREAD_POOL_SIZE 16
-#define SBUFSIZE 128
+#define THREAD_POOL_SIZE 10
+#define SBUFSIZE 300
 
 void *request_handler(void *vargp);
 sbuf_t sbuf; /* Shared buffer of descriptors of connected client */
+jmp_buf jmp_buf_env; /* For setjmp() longjmp() environment */

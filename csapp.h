@@ -149,7 +149,7 @@ void rio_readinitb(rio_t *rp, int fd);
 ssize_t	rio_readnb(rio_t *rp, void *usrbuf, size_t n);
 ssize_t	rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen);
 
-/* Wrappers for Rio package */
+/* Wrappers for Rio package | Modified */
 ssize_t Rio_readn(int fd, void *usrbuf, size_t n);
 void Rio_writen(int fd, void *usrbuf, size_t n);
 void Rio_readinitb(rio_t *rp, int fd); 
@@ -159,6 +159,9 @@ ssize_t Rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen);
 /* Client/server helper functions */
 int open_clientfd(char *hostname, int portno);
 int open_listenfd(int portno);
+
+/* Reentrant version */
+int open_clientfd_r(char *hostname, int portno);
 
 /* Wrappers for client/server helper functions */
 int Open_clientfd(char *hostname, int port);

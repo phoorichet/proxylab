@@ -10,26 +10,26 @@
 void unix_error(char *msg) /* unix-style error */
 {
     fprintf(stderr, "%s: %s\n", msg, strerror(errno));
-    exit(0);
+    // exit(0);
 }
 /* $end unixerror */
 
 void posix_error(int code, char *msg) /* posix-style error */
 {
     fprintf(stderr, "%s: %s\n", msg, strerror(code));
-    exit(0);
+    // exit(0);
 }
 
 void dns_error(char *msg) /* dns-style error */
 {
     fprintf(stderr, "%s: DNS error %d\n", msg, h_errno);
-    exit(0);
+    // exit(0);
 }
 
 void app_error(char *msg) /* application error */
 {
     fprintf(stderr, "%s\n", msg);
-    exit(0);
+    // exit(0);
 }
 /* $end errorfuns */
 
@@ -679,14 +679,18 @@ ssize_t rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
 /**********************************
  * Wrappers for robust I/O routines
  **********************************/
+
+/* Modified all wrappers here to call longjmp(env, fd) when error occurs */
+
 ssize_t Rio_readn(int fd, void *ptr, size_t nbytes) 
 {
     ssize_t n;
   
     if ((n = rio_readn(fd, ptr, nbytes)) < 0) {
 	   // unix_error("Rio_readn error");
-        clienterror(fd, "GET", "500", "Rio_readn error", strerror(errno));
-        pthread_exit(NULL);
+        // clienterror(fd, "GET", "500", "Rio_readn error", strerror(errno));
+        // pthread_exit(NULL);
+        longjmp(jmp_buf_env, fd);   /* Jump with "fd" as a return value */
     }
     return n;
 }
@@ -696,8 +700,9 @@ void Rio_writen(int fd, void *usrbuf, size_t n)
 {
     if (rio_writen(fd, usrbuf, n) != n) {
         //unix_error("Rio_writen error");
-        clienterror(fd, "GET", "500", "Rio_writen error", strerror(errno));
-        pthread_exit(NULL);
+        // clienterror(fd, "GET", "500", "Rio_writen error", strerror(errno));
+        // pthread_exit(NULL);
+        longjmp(jmp_buf_env, fd);   /* Jump with "fd" as a return value */
     }
 }
 
@@ -712,8 +717,9 @@ ssize_t Rio_readnb(rio_t *rp, void *usrbuf, size_t n)
 
     if ((rc = rio_readnb(rp, usrbuf, n)) < 0) {
         // unix_error("Rio_readn error");
-        clienterror(rp->rio_fd, "GET", "500", "Rio_readnb error", strerror(errno));
-        pthread_exit(NULL);
+        // clienterror(rp->rio_fd, "GET", "500", "Rio_readnb error", strerror(errno));
+        // pthread_exit(NULL);
+        longjmp(jmp_buf_env, rp->rio_fd);   /* Jump with "fd" as a return value */
     }
     return rc;
 }
@@ -724,8 +730,9 @@ ssize_t Rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
 
     if ((rc = rio_readlineb(rp, usrbuf, maxlen)) < 0) {
         // unix_error("Rio_readn error");
-        clienterror(rp->rio_fd, "GET", "500", "Rio_readlineb error", strerror(errno));
-        pthread_exit(NULL);
+        // clienterror(rp->rio_fd, "GET", "500", "Rio_readlineb error", strerror(errno));
+        // pthread_exit(NULL);
+        longjmp(jmp_buf_env, rp->rio_fd);   /* Jump with "fd" as a return value */
     }
     return rc;
 } 
@@ -747,11 +754,11 @@ int open_clientfd(char *hostname, int port)
     struct sockaddr_in serveraddr;
 
     if ((clientfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-	return -1; /* check errno for cause of error */
+	   return -1; /* check errno for cause of error */
 
     /* Fill in the server's IP address and port */
     if ((hp = gethostbyname(hostname)) == NULL)
-	return -2; /* check h_errno for cause of error */
+	   return -2; /* check h_errno for cause of error */
     bzero((char *) &serveraddr, sizeof(serveraddr));
     serveraddr.sin_family = AF_INET;
     bcopy((char *)hp->h_addr_list[0], 
@@ -760,10 +767,54 @@ int open_clientfd(char *hostname, int port)
 
     /* Establish a connection with the server */
     if (connect(clientfd, (SA *) &serveraddr, sizeof(serveraddr)) < 0)
-	return -1;
+	   return -1;
     return clientfd;
 }
 /* $end open_clientfd */
+
+/*
+ * open_clientfd_r - Reentrant version of open_clientfd
+ *      Implement by using gethostbyname_r instead
+ */
+int open_clientfd_r(char *hostname, int port) {
+    int clientfd, rc, err, tmpbuf_len = 1024;
+    struct sockaddr_in serveraddr;
+    struct hostent hbuf;
+    struct hostent *result;
+    char *tmpbuf;
+
+    // printf("_r 1\n");
+    if ((clientfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+       return -1; /* check errno for cause of error */
+
+    // printf("_r 2\n");
+    /* Call the reentrant version of gethostbyname
+        If there's error from E_RANGE, keep trying on expanding
+        tmpbuf until it works */
+    if ((tmpbuf = malloc(tmpbuf_len)) == NULL)
+        return -1;
+    while ((rc = gethostbyname_r(hostname, &hbuf, tmpbuf, tmpbuf_len, 
+        &result, &err)) == ERANGE) {        
+        tmpbuf_len *= 2;
+        if ((tmpbuf = realloc(tmpbuf, tmpbuf_len)) == NULL)
+            return -1;
+    }
+    // printf("_r 3\n");
+    if (rc != 0 || result == NULL)
+        return -2; /* check h_errno for cause of error */
+
+    bzero((char *) &serveraddr, sizeof(serveraddr));
+    serveraddr.sin_family = AF_INET;
+    bcopy((char *)hbuf.h_addr_list[0], 
+      (char *)&serveraddr.sin_addr.s_addr, hbuf.h_length);
+    serveraddr.sin_port = htons(port);
+
+    // printf("_r 4\n");
+    /* Establish a connection with the server */
+    if (connect(clientfd, (SA *) &serveraddr, sizeof(serveraddr)) < 0)
+       return -1;
+    return clientfd;
+}
 
 /*  
  * open_listenfd - open and return a listening socket on port
@@ -777,12 +828,12 @@ int open_listenfd(int port)
   
     /* Create a socket descriptor */
     if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-	return -1;
+	   return -1;
  
     /* Eliminates "Address already in use" error from bind. */
     if (setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, 
 		   (const void *)&optval , sizeof(int)) < 0)
-	return -1;
+	   return -1;
 
     /* Listenfd will be an endpoint for all requests to port
        on any IP address for this host */
@@ -791,11 +842,11 @@ int open_listenfd(int port)
     serveraddr.sin_addr.s_addr = htonl(INADDR_ANY); 
     serveraddr.sin_port = htons((unsigned short)port); 
     if (bind(listenfd, (SA *)&serveraddr, sizeof(serveraddr)) < 0)
-	return -1;
+	   return -1;
 
     /* Make it a listening socket ready to accept connection requests */
     if (listen(listenfd, LISTENQ) < 0)
-	return -1;
+	   return -1;
     return listenfd;
 }
 /* $end open_listenfd */

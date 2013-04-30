@@ -13,17 +13,14 @@ static const char *msg_accept_encoding = "Accept-Encoding: gzip, deflate\r\n";
 static const char *msg_connection = "Connection: close\r\n";
 static const char *msg_proxy_connection = "Proxy-Connection: close\r\n";
 
-
 /* 
- * sigpipe_handler - The kernel sends a SIGINT to the shell whenver the
- *    user types ctrl-c at the keyboard.  Catch it and send it along
- *    to the foreground job.  
+ * sigpipe_handler - Handle SIGPIPE .  
  */
 void sigpipe_handler(int sig) 
 {
     printf("!!!! [Thread %u] !! SIGPIPE !!!!!!!!!!!!!!!!!\n",
         (unsigned int)pthread_self());
-    pthread_exit(NULL);
+    //pthread_exit(NULL);
     return;
 }
 
@@ -94,12 +91,12 @@ void *request_handler(void *vargp){
         and finally wait for the other one. Do this forever */
     while (1) {
         int browserfd = sbuf_remove(&sbuf);
-        printf("[Thread %u] is handling browserfd = %d\n", 
+        printf("[Thread %u] is handling browserfd %d\n", 
             (unsigned int)pthread_self(), browserfd);
         process_conn(browserfd);
         Close(browserfd);
-        printf("    [Thread %u] has finished the job.\n", 
-            (unsigned int)pthread_self());
+        printf("    [Thread %u] has finished the job. browserfd %d closed.\n", 
+            (unsigned int)pthread_self(), browserfd);
     }
     
     /* The thread never reaches here because of the while loop */
@@ -114,23 +111,44 @@ void *request_handler(void *vargp){
  *      Otherwise, retrieve data from the web server and
  *      store it in a cache if its size doesn't exceed the limit.
  */
+
 void process_conn(int browserfd) {
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char host[MAXLINE], path[MAXLINE], cachebuf[MAX_OBJECT_SIZE];
+    char host[MAXLINE], /*path[MAXLINE],*/ cachebuf[MAX_OBJECT_SIZE];
     rio_t browser_rio, webserver_rio;
-    int webserverfd, n, is_exceeded_max_object_size;
+    int webserverfd = -1, n, is_exceeded_max_object_size;
     size_t cachebuf_size;
+    int setjmp_ret;
+
+    /* Landing point for error handling */
+    setjmp_ret = setjmp(jmp_buf_env);
+    if (setjmp_ret > 0) {
+        if (setjmp_ret == browserfd) {
+            /* Error from browserfd, then close webserverfd and return */
+            printf("Error from browserfd. Closing webserverfd..\n");
+            Close(webserverfd);
+        } else if (setjmp_ret == webserverfd) {
+            /* Error from webserverfd, then call clienterror() and return */
+            printf("Error from webserverfd\n");
+            clienterror(browserfd, "GET", "500", "Server error",
+                "Connection with the web server is lost.");
+        }
+        return;
+    }
 
     /* Read request line and headers, only GET method is supported */
     Rio_readinitb(&browser_rio, browserfd);
     Rio_readlineb(&browser_rio, buf, MAXLINE);
     sscanf(buf, "%s %s %s", method, uri, version);
-    printf("[Thread %u] <= %s", (unsigned int)pthread_self(), buf);
+    printf("[Thread %u] %s %s %s\n", (unsigned int)pthread_self(), method,
+        uri, version);
     if (strcasecmp(method, "GET")) {
         clienterror(browserfd, method, "501", "Not Implemented",
             "This proxy doesn't implement this method.");
         return;
     }
+
+    // printf("[Thread %u] xxx 1\n", (unsigned int)pthread_self());
 
     /* Check if the object with this uri is existed in the cache */
     CacheObject *cacheobj = cache_get(uri);
@@ -141,35 +159,36 @@ void process_conn(int browserfd) {
             (unsigned int)cacheobj->size);
         return;
     }
+    // printf("[Thread %u] xxx 2\n", (unsigned int)pthread_self());
 
     /* Extract path from URI */
-    parse_uri(uri, path);
+    // parse_uri(uri, path);
 
     // TODO: BUFFER THE REST OF HEADER THEN SCAN FOR "HOST" THEN FORWARD THEM TO THE SERVER
 
     /* Read Host value and store it */
     if (!parse_host(&browser_rio, buf, host)) {
-        clienterror(browserfd, method, "501", "Host header not found", buf);
+        clienterror(browserfd, method, "500", "Host header not found", buf);
         return;
     }
 
     /* Connect to the server specified by "host" */
-    // printf("* [Thread %u] Connecting to %s..", (unsigned int)pthread_self(), host);
-    if ((webserverfd = open_clientfd(host, HTTP_PORT)) < 0) {
+    printf("* [Thread %u] Connecting to %s..", (unsigned int)pthread_self(), host);
+    if ((webserverfd = open_clientfd_r(host, HTTP_PORT)) < 0) {
         if (webserverfd == -1)
-            clienterror(browserfd, method, "501", "Unix error", strerror(errno));
+            clienterror(browserfd, method, "500", "Server error", strerror(errno));
         else {   
             char errmsg[MAXLINE];
             sprintf(errmsg, "DNS error: %d", h_errno);
-            clienterror(browserfd, method, "501", "DNS error", errmsg);
+            clienterror(browserfd, method, "500", "DNS error", errmsg);
         }
         return;
     }
-    // printf(" connected.\n");
+    printf(" connected.\n");
     Rio_readinitb(&webserver_rio, webserverfd);
 
     /* Send HTTP header */
-    write_defaulthdrs(webserverfd, method, host, path);
+    write_defaulthdrs(webserverfd, method, host, uri);
 
     /* Read the rest of the header and forward necessary ones */
     readwrite_requesthdrs(&browser_rio, webserverfd);
