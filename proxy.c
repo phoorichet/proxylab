@@ -4,6 +4,7 @@
 #include "cache.h"
 #include "proxy.h"
 #include "csapp.h"
+#include "assert.h"
 // #include "proxythread.h"
 
 static const char *msg_http_version = "HTTP/1.0";
@@ -102,11 +103,11 @@ void *request_handler(void *vargp){
  * This function process the connection's request to GET data on the web server.
  */
 void process_conn(int browserfd) {
-    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
-    char host[MAXLINE], path[MAXLINE], cachebuf[MAX_OBJECT_SIZE];
+    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headbuf_line[MAXLINE];
+    char host[MAXLINE], path[MAXLINE], cachebuf[MAX_OBJECT_SIZE], headerbuf[MAXLINE];
     rio_t browser_rio, webserver_rio;
     int webserverfd, n, is_exceeded_max_object_size;
-    size_t cachebuf_size;
+    size_t cachebuf_size, headerbuf_size;
 
     /* Read request line and headers, only GET method is supported */
     Rio_readinitb(&browser_rio, browserfd);
@@ -128,13 +129,34 @@ void process_conn(int browserfd) {
         return;
     }
 
+    /* Read the rest of request header */
+    headerbuf_size = 0;
+    int is_host_ok = -1;
+    do {
+        n = Rio_readlineb(&browser_rio, buf, MAXLINE);
+        printf("~~~~~ buf[size=%u]: %s\n", n, buf);
+        memcpy((headerbuf + headerbuf_size), buf, n);
+        memcpy(headbuf_line, buf, n);
+        headerbuf_size += n;
+
+        if (parse_header_by_pattern("Host:", headbuf_line, host) == 0){
+            is_host_ok = 0;
+        }
+
+    } while (strcmp(buf, "\r\n") != 0);
+
+    // Make sure that the host line is send
+    assert(is_host_ok == 0);
+    
+    printf("~~~~~ Yep! We got em' all~ OK=%d\n", is_host_ok);
+
     /* Extract path from URI */
     parse_uri(uri, path);
 
     // TODO: BUFFER THE REST OF HEADER THEN SCAN FOR "HOST" THEN FORWARD THEM TO THE SERVER
 
     /* Read Host value and store it */
-    if (!parse_host(&browser_rio, buf, host)) {
+    if (is_host_ok != 0) {
         clienterror(browserfd, method, "501", "Host header not found", buf);
         return;
     }
@@ -217,6 +239,22 @@ int parse_host(rio_t *browser_rp, char *buf, char *host) {
     }
     strncpy(host, value, strlen(value));
     host[strlen(value)] = '\0';
+    return 1;
+}
+
+/* parse_host - Extract host from the header buffer */
+int parse_header_by_pattern(const char *pattern ,char *buf, char *host) {
+    char key[MAXLINE], value[MAXLINE];
+   
+    char *header_ptr = buf;
+    sscanf(header_ptr, "%s %s\n", key, value);
+    printf("++++++ %s %s\n", key, value);
+    if (strcasecmp(key, pattern) == 0) {
+        printf(">>>>>> Parsed Host: %s\n", value);
+        strncpy(host, value, strlen(value));
+        host[strlen(value)] = '\0';
+        return 0;
+    }
     return 1;
 }
 
