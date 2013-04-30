@@ -4,7 +4,6 @@
 #include "cache.h"
 #include "proxy.h"
 #include "csapp.h"
-#include "assert.h"
 // #include "proxythread.h"
 
 static const char *msg_http_version = "HTTP/1.0";
@@ -42,7 +41,7 @@ int main(int argc, char **argv)
     Signal(SIGPIPE,  sigpipe_handler);   /* SIGPIPE handler (Broken pipe) */
 
     /* If no port specified in the argument, use default (wkanchan:4647) */
-    port = (argc != 2)?PORT:atoi(argv[1]);
+	port = (argc != 2)?PORT:atoi(argv[1]);
     printf("\n\n\n\n\n\n\n\n\n\nRunning proxy at port %d..\n", port);
   
     /* Prefork worker threads into the thread pool */
@@ -113,7 +112,6 @@ void *request_handler(void *vargp){
  */
 
 void process_conn(int browserfd) {
-<<<<<<< HEAD
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char host[MAXLINE], /*path[MAXLINE],*/ cachebuf[MAX_OBJECT_SIZE];
     rio_t browser_rio, webserver_rio;
@@ -136,15 +134,6 @@ void process_conn(int browserfd) {
         }
         return;
     }
-=======
-    char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headbuf_line[MAXLINE];
-    char host[MAXLINE], path[MAXLINE], cachebuf[MAX_OBJECT_SIZE], headerbuf[MAXLINE];
-    rio_t browser_rio, webserver_rio;
-    int webserverfd, n, is_exceeded_max_object_size;
-    size_t cachebuf_size, headerbuf_size;
-    // char **header_arr;
-    // int header_arr_size = 0;
->>>>>>> d9f8149f6710b0f742092d28e4dd7cbafac89d7c
 
     /* Read request line and headers, only GET method is supported */
     Rio_readinitb(&browser_rio, browserfd);
@@ -169,52 +158,11 @@ void process_conn(int browserfd) {
             (unsigned int)cacheobj->size);
         return;
     }
-<<<<<<< HEAD
     // dbg_printf("[Thread %u] xxx 2\n", (unsigned int)pthread_self());
 
     /* Read Host value and store it */
     if (!parse_host(&browser_rio, buf, host)) {
         clienterror(browserfd, method, "500", "Host header not found", buf);
-=======
-
-    /* Read the rest of request header */
-    headerbuf_size = 0;
-    int is_host_ok = -1;
-    do {
-        n = Rio_readlineb(&browser_rio, buf, MAXLINE);
-        // printf("~~~~~ buf[size=%u]: %s\n", n, buf);
-        memcpy((headerbuf + headerbuf_size), buf, n);
-        memcpy(headbuf_line, buf, n);
-        headerbuf_size += n;
-
-        /* Copy each buffer line to an array */
-        // printf("%s\n", header_arr[header_arr_size]);
-        // *header_arr = Calloc(n, sizeof(char*));
-        // memcpy(*header_arr, buf, n);
-        // header_arr_size++;
-
-        if (parse_header_by_pattern("Host:", headbuf_line, host) == 0){
-            is_host_ok = 0;
-        }
-
-    } while (strcmp(buf, "\r\n") != 0);
-
-    // Make sure that the host line is send
-    assert(is_host_ok == 0);
-    
-    // printf("~~~~~ Yep! We got em' all~ OK=%d\n", is_host_ok);
-    // printf("%s\n", headerbuf);
-    // printf("~~~~~~\n");
-
-    /* Extract path from URI */
-    parse_uri(uri, path);
-
-    // TODO: BUFFER THE REST OF HEADER THEN SCAN FOR "HOST" THEN FORWARD THEM TO THE SERVER
-
-    /* Read Host value and store it */
-    if (is_host_ok != 0) {
-        clienterror(browserfd, method, "501", "Host header not found", buf);
->>>>>>> d9f8149f6710b0f742092d28e4dd7cbafac89d7c
         return;
     }
 
@@ -237,9 +185,7 @@ void process_conn(int browserfd) {
     write_defaulthdrs(webserverfd, method, host, uri);
 
     /* Read the rest of the header and forward necessary ones */
-    readwrite_requesthdrs(&browser_rio, webserverfd, headerbuf);
-
-    /* ============================ START BODY ===============================*/
+    readwrite_requesthdrs(&browser_rio, webserverfd);
 
     /* Read each line of response from the web server
         Accumulate it to the cache buffer, then forward it to the browser */
@@ -303,21 +249,6 @@ int parse_host(rio_t *browser_rp, char *buf, char *host) {
     return 1;
 }
 
-
-/* parse_header - Extract a specific key out of the header buffer */
-int parse_header_by_pattern(const char *pattern ,char *buf, char *host) {
-    char key[MAXLINE], value[MAXLINE];
-   
-    char *header_ptr = buf;
-    sscanf(header_ptr, "%s %s\n", key, value);
-    if (strcasecmp(key, pattern) == 0) {
-        strncpy(host, value, strlen(value));
-        host[strlen(value)] = '\0';
-        return 0;
-    }
-    return 1;
-}
-
 /* write_defaulthdrs - Write headers specified in the writeup
  *      to the web server
  */
@@ -342,76 +273,26 @@ void write_defaulthdrs(int webserverfd,char *method,char *host,char *path) {
         strlen(msg_proxy_connection));
 }
 
-
 /* readwrite_requesthdrs - Read the rest of the header
  *      and only forward lines that aren't specified in the writeup 
  */
-void readwrite_requesthdrs(rio_t *browser_rio, int browserfd, char *headerbuf) {
-    char key[MAXLINE], value[MAXLINE];
+void readwrite_requesthdrs(rio_t *browser_rio, int browserfd) {
+    char buf[MAXLINE], key[MAXLINE];
 
-    /* Loop to split header buf line by line */
-    char *cptr = headerbuf;
-    int first_line = 1;
-    int n = 0;
-    char *seeker;
-    char *cr_lf = "\r\n";
-    printf("------> Forwaring Header\n");
-    while (*cptr != '\0'){
-        // printf(">>>>>>>>>%c\n", *cptr);
-        if (first_line){
-            sscanf(cptr, "%s\n", key);
-            // printf("------> scan result:: %s %s\n", key, value);
-            first_line = 0;
-            seeker = cptr;
-            n = 0;
-            while( *seeker != '\n'){
-                n++;
-                seeker++;
-            }
-            bzero(value, MAXLINE);
-            memcpy(value, cptr, n);
-            printf("++++++> n=%d, %s\n", n, value);
-
-            if (strcasecmp(key, "User-Agent") &&
-                strcasecmp(key, "Accept:") &&
-                strcasecmp(key, "Accept-Encoding:") &&
-                strcasecmp(key, "Connection:") &&
-                strcasecmp(key, "Proxy-Connection:")) {
-                Rio_writen(browserfd, (void *)value, n);
-            }
+    do {
+        /* Read each line, get only key and consider forwarding it */
+        Rio_readlineb(browser_rio, buf, MAXLINE);
+        // dbg_printf("<< %s", buf);
+        strcpy(key, "");
+        sscanf(buf, "%s", key);
+        if (strcasecmp(key, "User-Agent") &&
+            strcasecmp(key, "Accept:") &&
+            strcasecmp(key, "Accept-Encoding:") &&
+            strcasecmp(key, "Connection:") &&
+            strcasecmp(key, "Proxy-Connection:")) {
+            Rio_writen(browserfd, (void *)buf, strlen(buf));
         }
-
-        if (*cptr == '\n'){
-            if (strcmp(cptr + 1, "\r\n") == 0){
-                printf("******* CR-LF\n");
-                /* Write 2 line fo CR-LF*/
-                Rio_writen(browserfd, cr_lf, strlen(cr_lf));
-                Rio_writen(browserfd, cr_lf, strlen(cr_lf));
-            }else if (*(cptr+1) == '\0'){
-
-            }else{
-                sscanf(cptr + 1, "%s", key);
-                seeker = cptr + 1;
-                n = 0;
-                while( *seeker != '\n'){
-                    n++;
-                    seeker++;
-                }
-                bzero(value, MAXLINE);
-                memcpy(value, cptr + 1, n);
-                printf("++++++> n=%d, %s\n", n, value);
-
-                if (strcasecmp(key, "User-Agent") &&
-                    strcasecmp(key, "Accept:") &&
-                    strcasecmp(key, "Accept-Encoding:") &&
-                    strcasecmp(key, "Connection:") &&
-                    strcasecmp(key, "Proxy-Connection:")) {
-                    Rio_writen(browserfd, (void *)value, n);
-                }
-            }
-        }
-        cptr++;
-    }
+    } while (strcmp(buf, "\r\n"));
 }
 
 /* clienterror - Print error page */
