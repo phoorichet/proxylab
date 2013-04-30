@@ -11,9 +11,10 @@
 #endif
 
 /* About request/response */
+void *request_handler(void *vargp);
 void process_conn(int browserfd);
-void parse_uri(char *uri, char *path);
-int parse_host(rio_t *browser_rp, char *buf, char *host);
+// void parse_uri(char *uri, char *path);
+int readline_host(rio_t *browser_rp, char *buf, char *host);
 void write_defaulthdrs(int webserverfd,char *method,char *host,char *path);
 void readwrite_requesthdrs(rio_t *browser_rio, int browserfd);
 void clienterror(int browserfd, char *cause, char *errnum,
@@ -23,6 +24,8 @@ void clienterror(int browserfd, char *cause, char *errnum,
 #define THREAD_POOL_SIZE 10
 #define SBUFSIZE 300
 
-void *request_handler(void *vargp);
 sbuf_t sbuf; /* Shared buffer of descriptors of connected client */
 jmp_buf jmp_buf_env; /* For setjmp() longjmp() environment */
+
+/* Sigpipe handler */
+void sigpipe_handler(int sig);

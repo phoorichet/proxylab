@@ -690,7 +690,7 @@ ssize_t Rio_readn(int fd, void *ptr, size_t nbytes)
 	   // unix_error("Rio_readn error");
         // clienterror(fd, "GET", "500", "Rio_readn error", strerror(errno));
         // pthread_exit(NULL);
-        longjmp(jmp_buf_env, fd);   /* Jump with "fd" as a return value */
+        longjmp(jmp_buf_env, 1000+fd);   /* Jump with "fd" as a return value */
     }
     return n;
 }
@@ -702,7 +702,7 @@ void Rio_writen(int fd, void *usrbuf, size_t n)
         //unix_error("Rio_writen error");
         // clienterror(fd, "GET", "500", "Rio_writen error", strerror(errno));
         // pthread_exit(NULL);
-        longjmp(jmp_buf_env, fd);   /* Jump with "fd" as a return value */
+        longjmp(jmp_buf_env, 9000+fd);   /* Jump with "fd" as a return value */
     }
 }
 
@@ -719,7 +719,7 @@ ssize_t Rio_readnb(rio_t *rp, void *usrbuf, size_t n)
         // unix_error("Rio_readn error");
         // clienterror(rp->rio_fd, "GET", "500", "Rio_readnb error", strerror(errno));
         // pthread_exit(NULL);
-        longjmp(jmp_buf_env, rp->rio_fd);   /* Jump with "fd" as a return value */
+        longjmp(jmp_buf_env, 3000+rp->rio_fd);   /* Jump with "fd" as a return value */
     }
     return rc;
 }
@@ -732,7 +732,7 @@ ssize_t Rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen)
         // unix_error("Rio_readn error");
         // clienterror(rp->rio_fd, "GET", "500", "Rio_readlineb error", strerror(errno));
         // pthread_exit(NULL);
-        longjmp(jmp_buf_env, rp->rio_fd);   /* Jump with "fd" as a return value */
+        longjmp(jmp_buf_env, 2000+rp->rio_fd);   /* Jump with "fd" as a return value */
     }
     return rc;
 } 

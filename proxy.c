@@ -13,36 +13,26 @@ static const char *msg_accept_encoding = "Accept-Encoding: gzip, deflate\r\n";
 static const char *msg_connection = "Connection: close\r\n";
 static const char *msg_proxy_connection = "Proxy-Connection: close\r\n";
 
-/* 
- * sigpipe_handler - Handle SIGPIPE .  
- */
-void sigpipe_handler(int sig) 
-{
-    dbg_printf("!!!! [Thread %u] !! SIGPIPE !!!!!!!!!!!!!!!!!\n",
-        (unsigned int)pthread_self());
-    //pthread_exit(NULL);
-    return;
-}
-
-/* main - TODO: put comment here */
+/* main - Initialize variables, prefork worker threads,
+    open listening port, accept incoming connections and add them
+    to the task buffer (sbuf) */
 int main(int argc, char **argv)
 {
     int listenfd, browserfd, port, i;
     socklen_t clientlen;
     struct sockaddr_in clientaddr;
-    // struct hostent *hp;
-    // char *haddrp;
     pthread_t tid[THREAD_POOL_SIZE];
 
     /* IMPORTANT: Initialize sbuf & cache */
     sbuf_init(&sbuf, SBUFSIZE);
     cache_init();
 
-    Signal(SIGPIPE,  sigpipe_handler);   /* SIGPIPE handler (Broken pipe) */
+    /* SIGPIPE handler (Broken pipe) */
+    Signal(SIGPIPE,  sigpipe_handler);
 
     /* If no port specified in the argument, use default (wkanchan:4647) */
 	port = (argc != 2)?PORT:atoi(argv[1]);
-    printf("\n\n\n\n\n\n\n\n\n\nRunning proxy at port %d..\n", port);
+    printf("\n\n\n\n\n\nRunning proxy at port %d..\n", port);
   
     /* Prefork worker threads into the thread pool */
     for (i = 0; i < THREAD_POOL_SIZE; i++) {
@@ -55,18 +45,11 @@ int main(int argc, char **argv)
         fprintf(stderr, "Open_listenfd error: %s\n", strerror(errno));
         exit(0);
     }
-    // dbg_printf("Listening on port %d\n", port);
     while (1) {
         clientlen = sizeof(clientaddr);
         browserfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
         dbg_printf("Accepted. [browserfd = %d]\n", browserfd);
-        sbuf_insert(&sbuf, browserfd); /* Insert browserfd in buffer */
-
-//        /* Show information of connected client */
-//        hp = Gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr,
-//            sizeof(clientaddr.sin_addr.s_addr), AF_INET);
-//        haddrp = inet_ntoa(clientaddr.sin_addr);
-//        dbg_printf("server connected to %s (%s)\n", hp->h_name, haddrp);
+        sbuf_insert(&sbuf, browserfd);
     }
 
     /* It won't reach here. But put this as a good convention */
@@ -74,7 +57,6 @@ int main(int argc, char **argv)
 
     return 0;
 }
-
 
 /*
  * request_handler - Thread routine once proxy server accept a request.
@@ -91,11 +73,11 @@ void *request_handler(void *vargp){
         and finally wait for the other one. Do this forever */
     while (1) {
         int browserfd = sbuf_remove(&sbuf);
-        dbg_printf("[Thread %u] is handling browserfd %d\n", 
+        dbg_printf("[Thread %u] is handling browserfd %d.\n", 
             (unsigned int)pthread_self(), browserfd);
         process_conn(browserfd);
         Close(browserfd);
-        dbg_printf("    [Thread %u] has finished the job. browserfd %d closed.\n", 
+        dbg_printf("[Thread %u] browserfd %d closed.\n", 
             (unsigned int)pthread_self(), browserfd);
     }
     
@@ -110,7 +92,6 @@ void *request_handler(void *vargp){
  *      Otherwise, retrieve data from the web server and
  *      store it in a cache if its size doesn't exceed the limit.
  */
-
 void process_conn(int browserfd) {
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char host[MAXLINE], /*path[MAXLINE],*/ cachebuf[MAX_OBJECT_SIZE];
@@ -122,16 +103,19 @@ void process_conn(int browserfd) {
     /* Landing point for error handling */
     setjmp_ret = setjmp(jmp_buf_env);
     if (setjmp_ret > 0) {
-        if (setjmp_ret == browserfd) {
-            /* Error from browserfd, then close webserverfd and return */
-            dbg_printf("Error from browserfd. Closing webserverfd..\n");
-            Close(webserverfd);
-        } else if (setjmp_ret == webserverfd) {
+        /* Error called from longjmp */
+        fprintf(stderr, "** Error called from longjmp fd %d\n", setjmp_ret);
+        // if (setjmp_ret == browserfd) {
+        //     /* Error from browserfd, then close webserverfd and return */
+        //     printf("Error from browserfd. Closing webserverfd..\n");
+        //     Close(webserverfd);
+        // } else if (setjmp_ret == webserverfd) {
             /* Error from webserverfd, then call clienterror() and return */
-            dbg_printf("Error from webserverfd\n");
+            // printf("Error from webserverfd\n");
             clienterror(browserfd, "GET", "500", "Server error",
                 "Connection with the web server is lost.");
-        }
+        // }
+        check_cache();
         return;
     }
 
@@ -147,7 +131,7 @@ void process_conn(int browserfd) {
         return;
     }
 
-    // dbg_printf("[Thread %u] xxx 1\n", (unsigned int)pthread_self());
+    dbg_printf("[Thread %u] xxx 1\n", (unsigned int)pthread_self());
 
     /* Check if the object with this uri is existed in the cache */
     CacheObject *cacheobj = cache_get(uri);
@@ -158,19 +142,21 @@ void process_conn(int browserfd) {
             (unsigned int)cacheobj->size);
         return;
     }
-    // dbg_printf("[Thread %u] xxx 2\n", (unsigned int)pthread_self());
+    dbg_printf("[Thread %u] xxx 2\n", (unsigned int)pthread_self());
 
     /* Read Host value and store it */
-    if (!parse_host(&browser_rio, buf, host)) {
+    if (!readline_host(&browser_rio, buf, host)) {
         clienterror(browserfd, method, "500", "Host header not found", buf);
         return;
     }
 
     /* Connect to the server specified by "host" */
-    dbg_printf("* [Thread %u] Connecting to %s..", (unsigned int)pthread_self(), host);
+    dbg_printf("* [Thread %u] Connecting to %s..\n", 
+        (unsigned int)pthread_self(), host);
     if ((webserverfd = open_clientfd_r(host, HTTP_PORT)) < 0) {
         if (webserverfd == -1)
-            clienterror(browserfd, method, "500", "Server error", strerror(errno));
+            clienterror(browserfd, method, "500", "Server error", 
+                strerror(errno));
         else {   
             char errmsg[MAXLINE];
             sprintf(errmsg, "DNS error: %d", h_errno);
@@ -178,7 +164,7 @@ void process_conn(int browserfd) {
         }
         return;
     }
-    dbg_printf(" connected.\n");
+    // dbg_printf(" connected.\n");
     Rio_readinitb(&webserver_rio, webserverfd);
 
     /* Send HTTP header */
@@ -210,7 +196,7 @@ void process_conn(int browserfd) {
     if (!is_exceeded_max_object_size) {
         int errorcode = cache_insert(uri, cachebuf, cachebuf_size);
         if (!errorcode) {
-            dbg_printf("^^^^^^ Inserted to cache %u bytes (now cache.size = %u)\n", 
+            dbg_printf("^^^ Inserted cache %u bytes (now cache.size = %u)\n", 
                 (unsigned int)cachebuf_size, (unsigned int)cache.size);
         } else {
             dbg_printf("ZZZ Couldn't insert to cache %d ZZZ\n",errorcode);
@@ -222,22 +208,25 @@ void process_conn(int browserfd) {
     Close(webserverfd);
 }
 
-/*
- * parse_uri - Given uri, extract the path.
- */
-void parse_uri(char *uri, char *path) {
-    char *ptr;
-    ptr = strstr(uri, "://");
-    ptr += 3;
-    ptr = strchr(ptr, '/');
-    strncpy(path, ptr, (int)strlen(uri));
-}
+// /*
+//  * parse_uri - Given uri, extract the path.
+//  */
+// void parse_uri(char *uri, char *path) {
+//     char *ptr;
+//     ptr = strstr(uri, "://");
+//     ptr += 3;
+//     ptr = strchr(ptr, '/');
+//     strncpy(path, ptr, (int)strlen(uri));
+// }
 
-/* parse_host - Given a header "Host" line, 
+/* readline_host - Given a header "Host" line, 
  *      extract host from the line.
  */
-int parse_host(rio_t *browser_rp, char *buf, char *host) {
+int readline_host(rio_t *browser_rp, char *buf, char *host) {
     char key[MAXLINE], value[MAXLINE];
+
+    dbg_printf("- readline_host");
+    dbg_printf(" buf: %s\n");
 
     Rio_readlineb(browser_rp, buf, MAXLINE);
     sscanf(buf, "%s %s", key, value);
@@ -315,4 +304,16 @@ void clienterror(int browserfd, char *cause, char *errnum,
     Rio_writen(browserfd, buf, strlen(buf));
     Rio_writen(browserfd, body, strlen(body));
 
+}
+
+/* 
+ * sigpipe_handler - Handle SIGPIPE .  
+ */
+void sigpipe_handler(int sig) 
+{
+    printf("!!!! [Thread %u] !! SIGPIPE !!!!!!!!!!!!!!!!!\n",
+        (unsigned int)pthread_self());
+    //pthread_exit(NULL);
+    check_cache();
+    return;
 }
