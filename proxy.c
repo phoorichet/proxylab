@@ -41,7 +41,7 @@ int main(int argc, char **argv)
     Signal(SIGPIPE,  sigpipe_handler);   /* SIGPIPE handler (Broken pipe) */
 
     /* If no port specified in the argument, use default (wkanchan:4647) */
-	port = (argc != 2)?PORT:atoi(argv[1]);
+    port = (argc != 2)?PORT:atoi(argv[1]);
     printf("\n\n\n\n\n\n\n\n\n\nRunning proxy at port %d..\n", port);
   
     /* Prefork worker threads into the thread pool */
@@ -59,7 +59,7 @@ int main(int argc, char **argv)
     while (1) {
         clientlen = sizeof(clientaddr);
         browserfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        printf("Accepted. [browserfd = %d]\n", browserfd);
+        dbg_printf("Accepted. [browserfd = %d]\n", browserfd);
         sbuf_insert(&sbuf, browserfd); /* Insert browserfd in buffer */
 
 //        /* Show information of connected client */
@@ -139,7 +139,7 @@ void process_conn(int browserfd) {
     Rio_readinitb(&browser_rio, browserfd);
     Rio_readlineb(&browser_rio, buf, MAXLINE);
     sscanf(buf, "%s %s %s", method, uri, version);
-    printf("[Thread %u] %s %s %s\n", (unsigned int)pthread_self(), method,
+    dbg_printf("[Thread %u] %s %s %s\n", (unsigned int)pthread_self(), method,
         uri, version);
     if (strcasecmp(method, "GET")) {
         clienterror(browserfd, method, "501", "Not Implemented",
@@ -159,11 +159,6 @@ void process_conn(int browserfd) {
         return;
     }
     // dbg_printf("[Thread %u] xxx 2\n", (unsigned int)pthread_self());
-
-    /* Extract path from URI */
-    // parse_uri(uri, path);
-
-    // TODO: BUFFER THE REST OF HEADER THEN SCAN FOR "HOST" THEN FORWARD THEM TO THE SERVER
 
     /* Read Host value and store it */
     if (!parse_host(&browser_rio, buf, host)) {
