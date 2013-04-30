@@ -18,7 +18,7 @@ static const char *msg_proxy_connection = "Proxy-Connection: close\r\n";
  */
 void sigpipe_handler(int sig) 
 {
-    printf("!!!! [Thread %u] !! SIGPIPE !!!!!!!!!!!!!!!!!\n",
+    dbg_printf("!!!! [Thread %u] !! SIGPIPE !!!!!!!!!!!!!!!!!\n",
         (unsigned int)pthread_self());
     //pthread_exit(NULL);
     return;
@@ -55,18 +55,18 @@ int main(int argc, char **argv)
         fprintf(stderr, "Open_listenfd error: %s\n", strerror(errno));
         exit(0);
     }
-    printf("Listening on port %d\n", port);
+    // dbg_printf("Listening on port %d\n", port);
     while (1) {
         clientlen = sizeof(clientaddr);
         browserfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        printf("Accepted. Added [browserfd = %d] to sbuf\n", browserfd);
+        printf("Accepted. [browserfd = %d]\n", browserfd);
         sbuf_insert(&sbuf, browserfd); /* Insert browserfd in buffer */
 
 //        /* Show information of connected client */
 //        hp = Gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr,
 //            sizeof(clientaddr.sin_addr.s_addr), AF_INET);
 //        haddrp = inet_ntoa(clientaddr.sin_addr);
-//        printf("server connected to %s (%s)\n", hp->h_name, haddrp);
+//        dbg_printf("server connected to %s (%s)\n", hp->h_name, haddrp);
     }
 
     /* It won't reach here. But put this as a good convention */
@@ -91,18 +91,17 @@ void *request_handler(void *vargp){
         and finally wait for the other one. Do this forever */
     while (1) {
         int browserfd = sbuf_remove(&sbuf);
-        printf("[Thread %u] is handling browserfd %d\n", 
+        dbg_printf("[Thread %u] is handling browserfd %d\n", 
             (unsigned int)pthread_self(), browserfd);
         process_conn(browserfd);
         Close(browserfd);
-        printf("    [Thread %u] has finished the job. browserfd %d closed.\n", 
+        dbg_printf("    [Thread %u] has finished the job. browserfd %d closed.\n", 
             (unsigned int)pthread_self(), browserfd);
     }
     
     /* The thread never reaches here because of the while loop */
     return NULL;
 }
-
 
 /* 
  * process_conn - Process the connection
@@ -125,11 +124,11 @@ void process_conn(int browserfd) {
     if (setjmp_ret > 0) {
         if (setjmp_ret == browserfd) {
             /* Error from browserfd, then close webserverfd and return */
-            printf("Error from browserfd. Closing webserverfd..\n");
+            dbg_printf("Error from browserfd. Closing webserverfd..\n");
             Close(webserverfd);
         } else if (setjmp_ret == webserverfd) {
             /* Error from webserverfd, then call clienterror() and return */
-            printf("Error from webserverfd\n");
+            dbg_printf("Error from webserverfd\n");
             clienterror(browserfd, "GET", "500", "Server error",
                 "Connection with the web server is lost.");
         }
@@ -148,18 +147,18 @@ void process_conn(int browserfd) {
         return;
     }
 
-    // printf("[Thread %u] xxx 1\n", (unsigned int)pthread_self());
+    // dbg_printf("[Thread %u] xxx 1\n", (unsigned int)pthread_self());
 
     /* Check if the object with this uri is existed in the cache */
     CacheObject *cacheobj = cache_get(uri);
     if (cacheobj != NULL) {
         /* Serve this cached object to the browser right away */
         Rio_writen(browserfd, cacheobj->data, cacheobj->size);
-        printf("@@@@@ Served from the cache %u bytes\n", 
+        dbg_printf("@@@@@ Served from the cache %u bytes\n", 
             (unsigned int)cacheobj->size);
         return;
     }
-    // printf("[Thread %u] xxx 2\n", (unsigned int)pthread_self());
+    // dbg_printf("[Thread %u] xxx 2\n", (unsigned int)pthread_self());
 
     /* Extract path from URI */
     // parse_uri(uri, path);
@@ -173,7 +172,7 @@ void process_conn(int browserfd) {
     }
 
     /* Connect to the server specified by "host" */
-    printf("* [Thread %u] Connecting to %s..", (unsigned int)pthread_self(), host);
+    dbg_printf("* [Thread %u] Connecting to %s..", (unsigned int)pthread_self(), host);
     if ((webserverfd = open_clientfd_r(host, HTTP_PORT)) < 0) {
         if (webserverfd == -1)
             clienterror(browserfd, method, "500", "Server error", strerror(errno));
@@ -184,7 +183,7 @@ void process_conn(int browserfd) {
         }
         return;
     }
-    printf(" connected.\n");
+    dbg_printf(" connected.\n");
     Rio_readinitb(&webserver_rio, webserverfd);
 
     /* Send HTTP header */
@@ -216,13 +215,13 @@ void process_conn(int browserfd) {
     if (!is_exceeded_max_object_size) {
         int errorcode = cache_insert(uri, cachebuf, cachebuf_size);
         if (!errorcode) {
-            printf("^^^^^^ Inserted to cache %u bytes (now cache.size = %u)\n", 
+            dbg_printf("^^^^^^ Inserted to cache %u bytes (now cache.size = %u)\n", 
                 (unsigned int)cachebuf_size, (unsigned int)cache.size);
         } else {
-            printf("ZZZ Couldn't insert to cache %d ZZZ\n",errorcode);
+            dbg_printf("ZZZ Couldn't insert to cache %d ZZZ\n",errorcode);
         }
     } else {
-        printf("XXX Object exceeds max size. Not cached. XXX\n");
+        dbg_printf("XXX Object exceeds max size. Not cached. XXX\n");
     }
     
     Close(webserverfd);

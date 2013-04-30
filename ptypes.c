@@ -7,6 +7,7 @@
 //
 
 #include <stdio.h>
+#include "proxy.h"
 #include "csapp.h"
 #include "ptypes.h"
 
@@ -35,33 +36,33 @@ void sbuf_deinit(sbuf_t *sp)
 /* Insert item onto the rear of shared buffer sp */
 void sbuf_insert(sbuf_t *sp, int item)
 {
-    printf("[Thread %u] :sbuf_insert: P(&sp->slots) [%d]\n", (unsigned int)pthread_self(), v_slots);
+    dbg_printf("[Thread %u] :sbuf_insert: P(&sp->slots) [%d]\n", (unsigned int)pthread_self(), v_slots);
     P(&sp->slots);                          /* Wait for available slot */
     v_slots--;
-    printf("[Thread %u] :sbuf_insert: P(&sp->mutex) [%d]\n", (unsigned int)pthread_self(), v_mutex);
+    dbg_printf("[Thread %u] :sbuf_insert: P(&sp->mutex) [%d]\n", (unsigned int)pthread_self(), v_mutex);
     P(&sp->mutex);                          /* Lock the buffer */
     v_mutex--;
     sp->buf[(++sp->rear)%(sp->n)] = item;   /* Insert the item */
     V(&sp->mutex);                          /* Unlock the buffer */
-    printf("[Thread %u] :sbuf_insert: V(&sp->mutex) [%d]\n", (unsigned int)pthread_self(), ++v_mutex);
+    dbg_printf("[Thread %u] :sbuf_insert: V(&sp->mutex) [%d]\n", (unsigned int)pthread_self(), ++v_mutex);
     V(&sp->items);                          /* Announce available item */
-    printf("[Thread %u] :sbuf_insert: V(&sp->items) [%d]\n", (unsigned int)pthread_self(), ++v_items);
+    dbg_printf("[Thread %u] :sbuf_insert: V(&sp->items) [%d]\n", (unsigned int)pthread_self(), ++v_items);
 }
 
 /* Remove and return the first item from buffer sp */
 int sbuf_remove(sbuf_t *sp)
 {
     int item;
-    printf("[Thread %u] :sbuf_remove: P(&sp->items) [%d]\n", (unsigned int)pthread_self(), v_items);
+    dbg_printf("[Thread %u] :sbuf_remove: P(&sp->items) [%d]\n", (unsigned int)pthread_self(), v_items);
     P(&sp->items);                          /* Wait for available item */
     v_items--;
-    printf("[Thread %u] :sbuf_remove: P(&sp->mutex) [%d]\n", (unsigned int)pthread_self(), v_mutex);
+    dbg_printf("[Thread %u] :sbuf_remove: P(&sp->mutex) [%d]\n", (unsigned int)pthread_self(), v_mutex);
     P(&sp->mutex);                          /* Lock the buffer */
     v_mutex--;
     item = sp->buf[(++sp->front)%(sp->n)];  /* Remove the item */
     V(&sp->mutex);                          /* Unlock the buffer */
-    printf("[Thread %u] :sbuf_insert: V(&sp->mutex) [%d]\n", (unsigned int)pthread_self(), ++v_mutex);
+    dbg_printf("[Thread %u] :sbuf_insert: V(&sp->mutex) [%d]\n", (unsigned int)pthread_self(), ++v_mutex);
     V(&sp->slots);                          /* Announce available slot */
-    printf("[Thread %u] :sbuf_remove: V(&sp->slots) [%d]\n", (unsigned int)pthread_self(), ++v_slots);
+    dbg_printf("[Thread %u] :sbuf_remove: V(&sp->slots) [%d]\n", (unsigned int)pthread_self(), ++v_slots);
     return item;
 }

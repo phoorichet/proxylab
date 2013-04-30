@@ -3,6 +3,13 @@
 #define PORT 4647
 #define HTTP_PORT 80
 
+// #define DEBUG
+#ifdef DEBUG
+# define dbg_printf(...) printf(__VA_ARGS__)
+#else
+# define dbg_printf(...)
+#endif
+
 /* About request/response */
 void process_conn(int browserfd);
 void parse_uri(char *uri, char *path);

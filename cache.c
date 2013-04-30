@@ -13,6 +13,7 @@
  */
 
 #include <stdio.h>
+#include "proxy.h"
 #include "cache.h"
 #include <assert.h>
 
@@ -32,22 +33,22 @@ void cache_init() {
  *		but only 1 reader at a time to move it to the end of the list.
  */
 CacheObject *cache_get(char *uri) {
-    printf("[Thread %u] :cache_get: 1 P(&cache.mutex)\n", (unsigned int)pthread_self());
+    dbg_printf("[Thread %u] :cache_get: 1 P(&cache.mutex)\n", (unsigned int)pthread_self());
 	P(&cache.mutex);
 	cache.readcnt++;
 	if (cache.readcnt == 1) {
-    	// printf("[Thread %u] :cache_get: P(&cache.w)\n", (unsigned int)pthread_self());
+    	// dbg_printf("[Thread %u] :cache_get: P(&cache.w)\n", (unsigned int)pthread_self());
 		P(&cache.w);
 	}
-	// printf("[Thread %u] :cache_get: readcnt = %d\n", (unsigned int)pthread_self(), cache.readcnt);
-    printf("[Thread %u] :cache_get: 1 V(&cache.mutex)\n", (unsigned int)pthread_self());
+	// dbg_printf("[Thread %u] :cache_get: readcnt = %d\n", (unsigned int)pthread_self(), cache.readcnt);
+    dbg_printf("[Thread %u] :cache_get: 1 V(&cache.mutex)\n", (unsigned int)pthread_self());
 	V(&cache.mutex);
 
 	CacheObject *ptr = cache.head;
-	printf("~~~~~~~ Looking for uri = %s\n", uri);
+	dbg_printf("~~~~~~~ Looking for uri = %s\n", uri);
 	while (ptr != NULL) {
 
-		// printf("\t CacheObject URI: %s\n", ptr->uri);
+		// dbg_printf("\t CacheObject URI: %s\n", ptr->uri);
 
 		/* Look for a cache object with the same uri.
 			When found, move this object to the tail.
@@ -68,19 +69,19 @@ CacheObject *cache_get(char *uri) {
 				V(&cache.mutex);	/* Unlock the cache */
 			}
 
-			printf("... CACHE HIT! :)\n");
-		    printf("[Thread %u] :cache_get: 2 P(&cache.mutex)\n", (unsigned int)pthread_self());
+			dbg_printf("... CACHE HIT! :)\n");
+		    dbg_printf("[Thread %u] :cache_get: 2 P(&cache.mutex)\n", (unsigned int)pthread_self());
 			P(&cache.mutex); /* Lock mutex */
 			cache.readcnt--;
 			if (cache.readcnt == 0) {
-		    	// printf("[Thread %u] :cache_get: V(&cache.w)\n", (unsigned int)pthread_self());
+		    	// dbg_printf("[Thread %u] :cache_get: V(&cache.w)\n", (unsigned int)pthread_self());
 				V(&cache.w);
 			}
-			// printf("[Thread %u] :cache_get: readcnt = %d\n", (unsigned int)pthread_self(), cache.readcnt);
-		    printf("[Thread %u] :cache_get: 2 V(&cache.mutex)\n", (unsigned int)pthread_self());
+			// dbg_printf("[Thread %u] :cache_get: readcnt = %d\n", (unsigned int)pthread_self(), cache.readcnt);
+		    dbg_printf("[Thread %u] :cache_get: 2 V(&cache.mutex)\n", (unsigned int)pthread_self());
 			V(&cache.mutex); /* Unlock mutex */
 
-			// printf("******** After get *********\n");
+			// dbg_printf("******** After get *********\n");
 			check_cache();
 			print_cache();
 			
@@ -91,16 +92,16 @@ CacheObject *cache_get(char *uri) {
 		ptr = ptr->next;
 	}
 
-	printf("... cache missed :(\n");
-    printf("[Thread %u] :cache_get: 3 P(&cache.mutex)\n", (unsigned int)pthread_self());
+	dbg_printf("... cache missed :(\n");
+    dbg_printf("[Thread %u] :cache_get: 3 P(&cache.mutex)\n", (unsigned int)pthread_self());
 	P(&cache.mutex); /* Lock mutex */
 	cache.readcnt--;
 	if (cache.readcnt == 0) {
-    	// printf("[Thread %u] :cache_get: V(&cache.w)\n", (unsigned int)pthread_self());
+    	// dbg_printf("[Thread %u] :cache_get: V(&cache.w)\n", (unsigned int)pthread_self());
 		V(&cache.w);
 	}
-	// printf("[Thread %u] :cache_get: readcnt = %d\n", (unsigned int)pthread_self(), cache.readcnt);
-    printf("[Thread %u] :cache_get: 3 V(&cache.mutex)\n", (unsigned int)pthread_self());
+	// dbg_printf("[Thread %u] :cache_get: readcnt = %d\n", (unsigned int)pthread_self(), cache.readcnt);
+    dbg_printf("[Thread %u] :cache_get: 3 V(&cache.mutex)\n", (unsigned int)pthread_self());
 	V(&cache.mutex); /* Unlock mutex */
 
 
@@ -124,7 +125,7 @@ int cache_insert(char *uri, void *data, size_t objectsize) {
 		Evict until this new object fits the cache */
 	while (cache.size + objectsize > MAX_CACHE_SIZE) {
 		cache_evict();
-		printf("Evicted (cache size = %u, and we need %u)\n", (unsigned int)cache.size, (unsigned int)objectsize);
+		dbg_printf("Evicted (cache size = %u, and we need %u)\n", (unsigned int)cache.size, (unsigned int)objectsize);
 	}
 
 	/* Create a new cache object. Copy data to the cache object's */
@@ -135,7 +136,7 @@ int cache_insert(char *uri, void *data, size_t objectsize) {
 	strncpy(newobject->uri, uri, strlen(uri));
 	memcpy(newobject->data, data, objectsize);
 
-	// printf("[Thread %u] :insert: P(&cache.w)\n", (unsigned int)pthread_self());
+	// dbg_printf("[Thread %u] :insert: P(&cache.w)\n", (unsigned int)pthread_self());
 	P(&cache.w); /* Lock writer */
 
 	if (cache.head == NULL && cache.tail == NULL) {
@@ -153,10 +154,10 @@ int cache_insert(char *uri, void *data, size_t objectsize) {
 	/* Update cache size */
 	cache.size += objectsize;
 
-	// printf("[Thread %u] :insert: V(&cache.w)\n", (unsigned int)pthread_self());
+	// dbg_printf("[Thread %u] :insert: V(&cache.w)\n", (unsigned int)pthread_self());
 	V(&cache.w); /* Unlock writer */
 
-	// printf("[Thread %u] After inserted *********\n", (unsigned int)pthread_self());
+	// dbg_printf("[Thread %u] After inserted *********\n", (unsigned int)pthread_self());
 	check_cache();
 	print_cache();
 
@@ -170,7 +171,7 @@ void cache_evict() {
 	if (cache.head == NULL)
 		return;
 
-	// printf("[Thread %u] :evict: P(&cache.w)\n", (unsigned int)pthread_self());
+	// dbg_printf("[Thread %u] :evict: P(&cache.w)\n", (unsigned int)pthread_self());
 	P(&cache.w); /* Lock writer */
 	CacheObject *victim = cache.head;
 	if (victim->next != NULL) victim->next->prev = NULL;
@@ -178,10 +179,10 @@ void cache_evict() {
 	Free(victim->data);
 	Free(victim);
 	cache.size -= victim->size;
-	// printf("[Thread %u] :evict: V(&cache.w)\n", (unsigned int)pthread_self());
+	// dbg_printf("[Thread %u] :evict: V(&cache.w)\n", (unsigned int)pthread_self());
 	V(&cache.w); /* Unlock writer */
 
-	// printf("******** After evicted *********\n");
+	// dbg_printf("******** After evicted *********\n");
 	check_cache();
 	print_cache();
 
@@ -192,20 +193,20 @@ void cache_evict() {
 void print_cache() {
 	return;
 	int objcnt = 0;
-	printf("***** Cache (size = %u) ******\n", (unsigned int)cache.size);
+	dbg_printf("***** Cache (size = %u) ******\n", (unsigned int)cache.size);
 	CacheObject *ptr = cache.head;
 	while (ptr != NULL) {
 		objcnt++;
-		printf("p[%d]\t%s\n", objcnt, ptr->uri);
+		dbg_printf("p[%d]\t%s\n", objcnt, ptr->uri);
 		ptr = ptr->next;
 	}
-	printf("*** end (object count = %d) ***\n", objcnt);
+	dbg_printf("*** end (object count = %d) ***\n", objcnt);
 }
 
 /* check_cache - Check cache consistency */
 void check_cache() {
 	return;
-	// printf("Checking cache consistency (expected cache.size = %u)..\n", 
+	// dbg_printf("Checking cache consistency (expected cache.size = %u)..\n", 
 	// 	(unsigned int)cache.size);
 
 	// P(&cache.mutex);
@@ -214,7 +215,7 @@ void check_cache() {
 	size_t csize = 0;
 	CacheObject *ptr = cache.head;
 	while (ptr != NULL) {
-		// printf("c[%d]\t%s\n", ++objcnt, ptr->uri);
+		// dbg_printf("c[%d]\t%s\n", ++objcnt, ptr->uri);
 
 		if (ptr->prev != NULL) {
 			assert(ptr->prev->next == ptr);
