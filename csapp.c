@@ -808,10 +808,10 @@ int Open_clientfd(char *hostname, int port)
     int rc;
 
     if ((rc = open_clientfd(hostname, port)) < 0) {
-	if (rc == -1)
-	    unix_error("Open_clientfd Unix error");
-	else        
-	    dns_error("Open_clientfd DNS error");
+    	if (rc == -1)
+    	    unix_error("Open_clientfd Unix error");
+    	else        
+    	    dns_error("Open_clientfd DNS error");
     }
     return rc;
 }

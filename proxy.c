@@ -14,6 +14,20 @@ static const char *msg_accept_encoding = "Accept-Encoding: gzip, deflate\r\n";
 static const char *msg_connection = "Connection: close\r\n";
 static const char *msg_proxy_connection = "Proxy-Connection: close\r\n";
 
+
+/* 
+ * sigpipe_handler - The kernel sends a SIGINT to the shell whenver the
+ *    user types ctrl-c at the keyboard.  Catch it and send it along
+ *    to the foreground job.  
+ */
+void sigpipe_handler(int sig) 
+{
+    printf("!!!! [Thread %u] !! SIGPIPE !!!!!!!!!!!!!!!!!\n",
+        (unsigned int)pthread_self());
+    pthread_exit(NULL);
+    return;
+}
+
 /* main - TODO: put comment here */
 int main(int argc, char **argv)
 {
@@ -24,36 +38,32 @@ int main(int argc, char **argv)
     // char *haddrp;
     pthread_t tid[THREAD_POOL_SIZE];
 
-    /* Initialize sbuf & cache */
+    /* IMPORTANT: Initialize sbuf & cache */
     sbuf_init(&sbuf, SBUFSIZE);
     cache_init();
 
-	// if (argc != 1) {
-	// 	fprintf(stderr, "usage: %s <port>\n", argv[0]);
-	// 	exit(0);
-	// }
-//    printmf("%s%s%s", msg_user_agent, msg_accept, msg_accept_encoding);
+    Signal(SIGPIPE,  sigpipe_handler);   /* SIGPIPE handler (Broken pipe) */
+
+    /* If no port specified in the argument, use default (wkanchan:4647) */
 	port = (argc != 2)?PORT:atoi(argv[1]);
-    printf("Running proxy at port %d..\n", port);
+    printf("\n\n\n\n\n\n\n\n\n\nRunning proxy at port %d..\n", port);
   
-    // printf("Pre-forking %d working threads..", THREAD_POOL_SIZE);
-    /* Prefork thread to the thread pool */
+    /* Prefork worker threads into the thread pool */
     for (i = 0; i < THREAD_POOL_SIZE; i++) {
         Pthread_create(&tid[i], NULL, request_handler, NULL);
     }
-    // printf("done!\n");
 
-    /* Listen to incoming clients.. forever */
+    /* Listen to incoming clients, accept, and insert it to sbuf
+        so that worker threads can grab and process them. */
     if ((listenfd = open_listenfd(port)) < 0) {
         fprintf(stderr, "Open_listenfd error: %s\n", strerror(errno));
         exit(0);
     }
-    
     printf("Listening on port %d\n", port);
     while (1) {
         clientlen = sizeof(clientaddr);
         browserfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-        printf("Accepted browserfd = %d to s_buf\n", browserfd);
+        printf("Accepted. Added [browserfd = %d] to sbuf\n", browserfd);
         sbuf_insert(&sbuf, browserfd); /* Insert browserfd in buffer */
 
 //        /* Show information of connected client */
@@ -63,6 +73,7 @@ int main(int argc, char **argv)
 //        printf("server connected to %s (%s)\n", hp->h_name, haddrp);
     }
 
+    /* It won't reach here. But put this as a good convention */
     sbuf_deinit(&sbuf);
 
     return 0;
@@ -70,13 +81,10 @@ int main(int argc, char **argv)
 
 
 /*
- * Thread routine once proxy server accept a request.
- * This function will do:
- * 1. Check the request header
- *    - Ignore dynamic object
- * TBD
- *
- * Be aware of cleaning all open file desciripters.
+ * request_handler - Thread routine once proxy server accept a request.
+ *      Detach itself. Then loop forever to grab a file descriptor from sbuf
+ *      inserted by the main thread (that accepted a connection).
+ *      Then process it. And finally close it.
  */
 void *request_handler(void *vargp){
     
@@ -87,10 +95,12 @@ void *request_handler(void *vargp){
         and finally wait for the other one. Do this forever */
     while (1) {
         int browserfd = sbuf_remove(&sbuf);
-        printf("[Thread %u] is handling browserfd = %d\n", (unsigned int)pthread_self(), browserfd);
+        printf("[Thread %u] is handling browserfd = %d\n", 
+            (unsigned int)pthread_self(), browserfd);
         process_conn(browserfd);
         Close(browserfd);
-        printf("    [Thread %u] has finished the job.\n", (unsigned int)pthread_self());
+        printf("    [Thread %u] has finished the job.\n", 
+            (unsigned int)pthread_self());
     }
     
     /* The thread never reaches here because of the while loop */
@@ -100,7 +110,10 @@ void *request_handler(void *vargp){
 
 /* 
  * process_conn - Process the connection
- * This function process the connection's request to GET data on the web server.
+ *      Connect and request data from a web server.
+ *      Check if there's a cache for that then serves the cached data.
+ *      Otherwise, retrieve data from the web server and
+ *      store it in a cache if its size doesn't exceed the limit.
  */
 void process_conn(int browserfd) {
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE], headbuf_line[MAXLINE];
@@ -113,7 +126,7 @@ void process_conn(int browserfd) {
     Rio_readinitb(&browser_rio, browserfd);
     Rio_readlineb(&browser_rio, buf, MAXLINE);
     sscanf(buf, "%s %s %s", method, uri, version);
-    printf("[Thread %u] <=== %s", (unsigned int)pthread_self(), buf);
+    printf("[Thread %u] <= %s", (unsigned int)pthread_self(), buf);
     if (strcasecmp(method, "GET")) {
         clienterror(browserfd, method, "501", "Not Implemented",
             "This proxy doesn't implement this method.");
@@ -125,7 +138,8 @@ void process_conn(int browserfd) {
     if (cacheobj != NULL) {
         /* Serve this cached object to the browser right away */
         Rio_writen(browserfd, cacheobj->data, cacheobj->size);
-        printf("@@@@@ Served from the cache %u bytes\n", (unsigned int)cacheobj->size);
+        printf("@@@@@ Served from the cache %u bytes\n", 
+            (unsigned int)cacheobj->size);
         return;
     }
 
@@ -167,7 +181,9 @@ void process_conn(int browserfd) {
         if (webserverfd == -1)
             clienterror(browserfd, method, "501", "Unix error", strerror(errno));
         else {   
-            clienterror(browserfd, method, "501", "DNS error", strerror(errno));
+            char errmsg[MAXLINE];
+            sprintf(errmsg, "DNS error: %d", h_errno);
+            clienterror(browserfd, method, "501", "DNS error", errmsg);
         }
         return;
     }
@@ -203,12 +219,10 @@ void process_conn(int browserfd) {
     if (!is_exceeded_max_object_size) {
         int errorcode = cache_insert(uri, cachebuf, cachebuf_size);
         if (!errorcode) {
-            printf("^^^^^^ Inserted to the cache %u bytes (now cache size = %u)\n", 
+            printf("^^^^^^ Inserted to cache %u bytes (now cache.size = %u)\n", 
                 (unsigned int)cachebuf_size, (unsigned int)cache.size);
         } else {
-            // TODO: To test robustness for BIG object
-            printf("damn it I couldn't insert to cache %d\n",errorcode);
-            exit(0);
+            printf("ZZZ Couldn't insert to cache %d ZZZ\n",errorcode);
         }
     } else {
         printf("XXX Object exceeds max size. Not cached. XXX\n");
@@ -218,7 +232,7 @@ void process_conn(int browserfd) {
 }
 
 /*
- * parse_uri - parse URI and extract the path
+ * parse_uri - Given uri, extract the path.
  */
 void parse_uri(char *uri, char *path) {
     char *ptr;
@@ -228,7 +242,9 @@ void parse_uri(char *uri, char *path) {
     strncpy(path, ptr, (int)strlen(uri));
 }
 
-/* parse_host - Extract host from the header */
+/* parse_host - Given a header "Host" line, 
+ *      extract host from the line.
+ */
 int parse_host(rio_t *browser_rp, char *buf, char *host) {
     char key[MAXLINE], value[MAXLINE];
 
@@ -242,6 +258,7 @@ int parse_host(rio_t *browser_rp, char *buf, char *host) {
     return 1;
 }
 
+<<<<<<< HEAD
 /* parse_host - Extract host from the header buffer */
 int parse_header_by_pattern(const char *pattern ,char *buf, char *host) {
     char key[MAXLINE], value[MAXLINE];
@@ -259,6 +276,11 @@ int parse_header_by_pattern(const char *pattern ,char *buf, char *host) {
 }
 
 /* write_defaulthdrs - Write headers from requirement */
+=======
+/* write_defaulthdrs - Write headers specified in the writeup
+ *      to the web server
+ */
+>>>>>>> 401d27c4c55367dda50c36ea0e0fffdfd27977a8
 void write_defaulthdrs(int webserverfd,char *method,char *host,char *path) {
     char buf[MAXLINE];
 
@@ -281,7 +303,8 @@ void write_defaulthdrs(int webserverfd,char *method,char *host,char *path) {
 }
 
 /* readwrite_requesthdrs - Read the rest of the header
-    and only forward lines that aren't specified in the writeup */
+ *      and only forward lines that aren't specified in the writeup 
+ */
 void readwrite_requesthdrs(rio_t *browser_rio, int browserfd) {
     char buf[MAXLINE], key[MAXLINE];
 
@@ -321,45 +344,4 @@ void clienterror(int browserfd, char *cause, char *errnum,
     Rio_writen(browserfd, buf, strlen(buf));
     Rio_writen(browserfd, body, strlen(body));
 
-}
-
-/* 
- * Return 1 if the header contain fields that identify the request object 
- * can be retrived from our cache.
- * Return 0 otherwise.
- * !BE CAREFUL, this will be executed in thread.
- */
-int contain_cache_header(char *buf){
-    // TODO
-    return 0;
-}
-
-
-/*
- * Return 1 if the requested url is in our cache already; return 0 otherwise.
- * !BE CAREFUL, this will be executed in thread.
- */
-int in_cache(char *url){
-    // TODO
-    return 0;
-}
-
-/* 
- * Write cached object back to the client. 
- * !BE CAREFUL, this will be executed in thread.
- */
-int send_from_cache(char *url, int client_fd){
-    // TODO
-    return 0;
-}
-
-/* 
- * Forward the request from the client to the Internet. Send the result back
- * to the client. Finally, update HIT counter in cache module to support LRU 
- * policy.
- * !BE CAREFUL, this will be executed in thread.
- */
-int get_from_internet(char *buf, int client_fd){
-    // TODO
-    return 0;
 }
