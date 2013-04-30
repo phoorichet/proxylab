@@ -47,26 +47,26 @@ CacheObject *cache_get(char *uri) {
 	printf("~~~~~~~ Looking for uri = %s\n", uri);
 	while (ptr != NULL) {
 
+		printf("\t CacheObject URI: %s\n", ptr->uri);
+
 		/* Look for a cache object with the same uri.
 			When found, move this object to the tail.
 			Then return this object. */
 		if (!strcasecmp(uri, ptr->uri)) {
 
-			/* Rearrange prev/next, head/tail pointers */
-			P(&cache.mutex);	/* Lock mutex */
-			if (ptr->prev != NULL)
-				ptr->prev->next = ptr->next;
-			else 
-				cache.head = ptr->next;
-			/* Move it to the end if the object itself isn't tail */
-			if (ptr->next != NULL) {
-				ptr->next->prev = ptr->prev;
+			/* Move the object to the tail by first removing it then
+				append it to the tail of the list */
+			if (ptr != cache.tail) {
+				P(&cache.mutex);	/* Lock the cache */
+				if (ptr->prev != NULL) ptr->prev->next = ptr->next;
+				else cache.head = ptr->next;
+				if (ptr->next != NULL) ptr->next->prev = ptr->prev;
 				(cache.tail)->next = ptr;
 				ptr->prev = cache.tail;
 				ptr->next = NULL;
 				cache.tail = ptr;
+				V(&cache.mutex);	/* Unlock the cache */
 			}
-			V(&cache.mutex);	/* Unlock mutex */
 
 			printf("... CACHE HIT! :)\n");
 		    // printf("[Thread %u] :cache_get: P(&cache.mutex)\n", (unsigned int)pthread_self());
