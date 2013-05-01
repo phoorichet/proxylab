@@ -24,6 +24,7 @@ void clienterror(int browserfd, char *cause, char *errnum,
 #define THREAD_POOL_SIZE 10
 #define SBUFSIZE 300
 
+pthread_t tid[THREAD_POOL_SIZE];
 sbuf_t sbuf; /* Shared buffer of descriptors of connected client */
 jmp_buf jmp_buf_env; /* For setjmp() longjmp() environment */
 

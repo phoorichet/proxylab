@@ -229,7 +229,7 @@ void print_cache() {
 
 /* check_cache - Check cache consistency */
 void check_cache() {
-	return;
+	// return;
 	dbg_printf("Checking cache consistency (expected cache.size = %u)..\n", 
 		(unsigned int)cache.size);
 
